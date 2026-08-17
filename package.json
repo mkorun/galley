@@ -41,7 +41,6 @@
 		"build": "tsc",
 		"typecheck": "tsc --noEmit",
 		"test:compiler": "bun test tests/compiler.test.ts",
-		"bench:compiler": "bun ../private/bench/compiler-performance.ts",
 		"prepublishOnly": "bun run typecheck && bun test && bun run build"
 	},
 	"keywords": ["template", "template-engine", "html", "ssg", "chase"],

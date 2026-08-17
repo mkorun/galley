@@ -6,7 +6,8 @@ import util from '../util'
 // benchmark/conformance workspace) and is never published or cloned with
 // galley itself. These three tests are the only ones that need it, and skip
 // themselves when it isn't present instead of failing the whole file.
-const legacyModule = await import('../../private/legacy/index').catch(() => null)
+const legacyPath = '../../private/legacy/index'
+const legacyModule = await import(legacyPath).catch(() => null)
 const galleyLegacy = legacyModule?.default as typeof galley | undefined
 
 const render = async (template: string, data: Record<string, unknown> = {}) => {

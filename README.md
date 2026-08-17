@@ -424,7 +424,9 @@ JavaScript blocks execute in strict mode, matching the generated render function
 {@js}
 ```
 
-The block has full access to `$` (context), `util`, and all loop/snippet variables. `await` is allowed — the template is then compiled as an `async function`.
+The block has full access to `$` (context), `$$filters` (the filter map passed to
+`render()`), and all loop/snippet variables. `await` is allowed — the template
+is then compiled as an `async function`.
 
 For simple date formatting, the built-in filters are preferred — no `{@js}` needed:
 
