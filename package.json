@@ -1,0 +1,51 @@
+{
+	"name": "@mkorun/galley",
+	"version": "0.1.0",
+	"description": "galley — Svelte-inspired template engine, compiles once into native JS render functions",
+	"type": "module",
+	"author": "Michael Kortstiege <michael@mko.run>",
+	"license": "ISC",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/mkorun/galley.git"
+	},
+	"homepage": "https://github.com/mkorun/galley#readme",
+	"bugs": {
+		"url": "https://github.com/mkorun/galley/issues"
+	},
+	"engines": {
+		"node": ">=18.0.0"
+	},
+	"sideEffects": false,
+	"publishConfig": {
+		"access": "public"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./util": {
+			"types": "./dist/util.d.ts",
+			"import": "./dist/util.js"
+		}
+	},
+	"scripts": {
+		"test": "bun test",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test:compiler": "bun test tests/compiler.test.ts",
+		"bench:compiler": "bun ../private/bench/compiler-performance.ts",
+		"prepublishOnly": "bun run typecheck && bun test && bun run build"
+	},
+	"keywords": ["template", "template-engine", "html", "ssg", "chase"],
+	"devDependencies": {
+		"typescript": "^5.0.0"
+	}
+}
