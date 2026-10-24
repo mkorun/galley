@@ -3,6 +3,12 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-10-24
+
+### Changed
+
+- `{ expr }` escapes every value, not only strings: an array, object, number or boolean is turned into its string form and then escaped. In 0.1.0 an array or object from the data was written into the output unescaped, so data could inject markup (`{ tags }` with `tags: ['<script>…']`). A template that relied on that must use `{@raw}`.
+
 ## [0.1.0] — 2026-08-17
 
 ### Added

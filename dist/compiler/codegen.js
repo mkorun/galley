@@ -64,7 +64,7 @@ export const generate = (ast, options = {}) => {
                     if (node.raw)
                         body += `${buffer}+=(${expr}??'');`;
                     else
-                        body += `{const ${value}=${expr};${buffer}+=${value}==null?'':typeof ${value}==='string'?${value}.replace(/[&<>'"]/g,c=>$$html[c]):${value};}`;
+                        body += `{const ${value}=${expr};${buffer}+=${value}==null?'':String(${value}).replace(/[&<>'"]/g,c=>$$html[c]);}`;
                     if (node.emptyAttribute)
                         body += `${buffer}+='${markerClose}';`;
                     break;

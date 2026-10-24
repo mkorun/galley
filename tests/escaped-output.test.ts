@@ -23,6 +23,16 @@ describe('escaped output — { expr }', () => {
 			.toBe('&lt;b&gt;Test &amp; &quot;quoted&quot;&lt;/b&gt;')
 	})
 
+	// 0.1.0 escaped only strings: an array or object from the data reached the HTML as it was
+	test('arrays, objects and other values are escaped as their string form', async () => {
+		const evil = '</title><script>alert(1)</script>'
+		expect(await render('{ v }', { v: [evil, 'b'] })).toBe('&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;,b')
+		expect(await render('{ v }', { v: { toString: () => evil } })).toBe('&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;')
+		expect(await render('{ v ?? "x" }', { v: [evil] })).not.toContain('<script')
+		expect(await render('{ v | first }', { v: [[evil]] })).not.toContain('<script')
+		expect(await render('{ v }', { v: true })).toBe('true')
+	})
+
 	test('apostrophe is escaped', async () => {
 		expect(await render("{ title }", { title: "it's" })).toBe('it&apos;s')
 	})

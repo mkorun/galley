@@ -146,7 +146,7 @@ HTML-escapes the value. Safe for user input and metadata.
 <meta name="description" content="{ meta.description }">
 ```
 
-Special characters are escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `'` → `&apos;`, `"` → `&quot;`.
+Every value is turned into a string first (`String(value)`; `null` and `undefined` give an empty string), then its special characters are escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `'` → `&apos;`, `"` → `&quot;`. Arrays and objects are escaped too.
 
 **With fallback:**
 
