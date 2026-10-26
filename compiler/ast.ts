@@ -62,8 +62,6 @@ export interface OutputNode extends NodeBase {
 	readonly expression: Expression
 	readonly raw: boolean
 	readonly emptyAttribute?: 'content' | 'href'
-	// the URL attribute (href, src, …) whose value this output begins: it may write no URL of another scheme
-	readonly urlAttribute?: string
 }
 export interface ConstNode extends NodeBase { readonly kind: 'const'; readonly name: string; readonly expression: Expression }
 export interface IfBranch { readonly condition: Expression | null; readonly children: readonly TemplateNode[]; readonly span: SourceSpan }

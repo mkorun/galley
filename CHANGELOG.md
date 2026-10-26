@@ -3,6 +3,12 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] — 2026-10-26
+
+### Fixed
+
+- `G5001` checked only a value that directly followed `href="` and the other URL attributes in the template's text, so a URL of another scheme passed in an `{#if}` (`href="{#if a}{ a.url }{/if}"`), after an empty value (`href="{ unset }{ url }"`) and after a space (`href=" { url }"`). Each value written into a URL attribute is now checked at render time with what the attribute holds before it, a snippet's output too.
+
 ## [0.3.0] — 2026-10-26
 
 ### Added

@@ -1,11 +1,15 @@
 import { fail } from './diagnostics.js';
 /**
- * The check of a value that begins a URL attribute (analysis.ts), as the generated render function runs it: read as a
- * browser reads a URL (leading controls and spaces dropped, tabs and newlines removed), it is relative or has the
- * scheme http, https, mailto or tel, and names no other host without a scheme (`//host`, `\\host`); anything else
- * stops the render with error G5001.
+ * The check of what a render writes into a URL attribute, as the generated render function runs it. Next to each
+ * buffer, the function keeps what it wrote since the last `<` (the buffer's name and `t`), so the open tag a value is
+ * written into is known without reading the buffer. When a value goes into `href`, `src`, `action`, `formaction`,
+ * `poster`, `cite` or `xlink:href`, the attribute's value with it, read as a browser reads a URL (leading controls and
+ * spaces dropped, tabs and newlines removed), must be relative or have the scheme http, https, mailto or tel, and
+ * name no other host without a scheme (`//host`, `\\host`); anything else stops the render with error G5001. What
+ * came before the value in the attribute counts, however it got there: text, other values, values written in an
+ * {#if} or by a snippet.
  */
-const URL_CHECK = String.raw `const $$url=(v,a)=>{if(v==null)return v;const s=String(v),t=s.replace(/^[\u0000-\u0020]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(t)?!/^(?:https?|mailto|tel):/i.test(t):/^[\\/][\\/]/.test(t))throw new Error('G5001: '+a+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};`;
+const URL_CHECK = String.raw `const $$urlTag=/^<[a-z][^\s\/>]*(?:\s+[^\s"'>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\x60]+))?)*\s+(href|src|action|formaction|poster|cite|xlink:href)\s*=\s*(?:"([^"]*)|'([^']*)|([^\s"'=<>\x60]*))$/i;const $$url=(t,v)=>{if(v==null||v===''||t[0]!=='<'||t.indexOf('=')<0)return v;const m=$$urlTag.exec(t);if(!m)return v;const s=(m[2]??m[3]??m[4]??'')+String(v),u=s.replace(/^[\u0000- ]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(u)?!/^(?:https?|mailto|tel):/i.test(u):/^[\\/][\\/]/.test(u))throw new Error('G5001: '+m[1].toLowerCase()+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};const $$tail=(t,w)=>{const k=w.lastIndexOf('<');return k<0?t+w:w.slice(k)};`;
 const escapeJs = (value) => /[\\'\n\r\u2028\u2029]/.test(value)
     ? value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
         .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
@@ -46,19 +50,26 @@ const expressionCode = (expression, scope) => {
     }
 };
 export const generate = (ast, options = {}) => {
-    let body = "'use strict';$??={};let $$='';";
+    let body = "'use strict';$??={};let $$='',$$t='';";
     if (options.debug)
         body += '// [galley] AST compiler debug output\n';
     const markerOpen = '\uE000galley-meta\uE001', markerClose = '\uE002galley-meta\uE003';
-    let hasContentAttribute = false, hasHrefAttribute = false, hasUrlAttribute = false;
+    let hasContentAttribute = false, hasHrefAttribute = false;
     let sequence = 0;
     let isAsync = false;
     const emitNodes = (nodes, scope, buffer) => {
         for (const node of nodes) {
             switch (node.kind) {
-                case 'text':
+                case 'text': {
                     body += `${buffer}+='${escapeJs(node.value)}';`;
+                    // what was written since the last <, for URL_CHECK
+                    const open = node.value.lastIndexOf('<');
+                    if (open >= 0)
+                        body += `${buffer}t='${escapeJs(node.value.slice(open))}';`;
+                    else if (node.value)
+                        body += `${buffer}t+='${escapeJs(node.value)}';`;
                     break;
+                }
                 case 'output': {
                     const value = `$$v${++sequence}`;
                     const expr = expressionCode(node.expression, scope);
@@ -68,14 +79,11 @@ export const generate = (ast, options = {}) => {
                         hasHrefAttribute = true;
                     if (node.emptyAttribute)
                         body += `${buffer}+='${markerOpen}';`;
-                    // a value that begins a URL attribute is checked before it is written (URL_CHECK)
-                    const checked = node.urlAttribute ? `$$url(${expr},'${node.urlAttribute}')` : expr;
-                    if (node.urlAttribute)
-                        hasUrlAttribute = true;
+                    // checked before it is written, with what its open tag holds (URL_CHECK); an escaped value holds no <
                     if (node.raw)
-                        body += `${buffer}+=(${checked}??'');`;
+                        body += `{const ${value}=$$url(${buffer}t,${expr})??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`;
                     else
-                        body += `{const ${value}=${checked};${buffer}+=${value}==null?'':String(${value}).replace(/[&<>'"]/g,c=>$$html[c]);}`;
+                        body += `{const ${value}=${expr};if(${value}!=null){const e=$$url(${buffer}t,String(${value}).replace(/[&<>'"]/g,c=>$$html[c]));${buffer}+=e;${buffer}t+=e;}}`;
                     if (node.emptyAttribute)
                         body += `${buffer}+='${markerClose}';`;
                     break;
@@ -124,7 +132,7 @@ export const generate = (ast, options = {}) => {
                 }
                 case 'snippet': {
                     const snippetBuffer = `$$s${++sequence}`;
-                    body += `function ${node.name}(${node.param ?? ''}){let ${snippetBuffer}='';`;
+                    body += `function ${node.name}(${node.param ?? ''}){let ${snippetBuffer}='',${snippetBuffer}t='';`;
                     const childScope = scope.slice();
                     if (node.param)
                         childScope.push(node.param);
@@ -132,14 +140,17 @@ export const generate = (ast, options = {}) => {
                     body += `return ${snippetBuffer};}`;
                     break;
                 }
-                case 'render':
-                    body += `${buffer}+=(${node.name}(${node.argument ? expressionCode(node.argument, scope) : ''})??'');`;
+                case 'render': {
+                    const value = `$$v${++sequence}`;
+                    const call = `${node.name}(${node.argument ? expressionCode(node.argument, scope) : ''})`;
+                    body += `{const ${value}=$$url(${buffer}t,${call})??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`;
                     break;
+                }
                 case 'js':
                     if (!options.allowCode)
                         fail('G4001', '{@js} cannot be generated while allowCode is false', node.span, 'Enable allowCode only for trusted templates.');
                     isAsync ||= node.awaits;
-                    body += `${buffer}+=(${node.awaits ? `await (async()=>{${node.code}})()` : `(()=>{${node.code}})()`}??'');`;
+                    body += `{const $$j=(${node.awaits ? `await (async()=>{${node.code}})()` : `(()=>{${node.code}})()`}??'');${buffer}+=$$j;${buffer}t=$$tail(${buffer}t,String($$j));}`;
                     break;
                 case 'partial': fail('G4002', `Partial ${JSON.stringify(node.path)} was not expanded before code generation`, node.span);
             }
@@ -149,8 +160,7 @@ export const generate = (ast, options = {}) => {
     // addresses the data parameter itself, not a property literally named "$".
     emitNodes(ast.children, ['$'], '$$');
     // after the directive, which must stay the first statement
-    if (hasUrlAttribute)
-        body = body.replace("'use strict';", () => `'use strict';${URL_CHECK}`);
+    body = body.replace("'use strict';", () => `'use strict';${URL_CHECK}`);
     if (options.strip)
         body += '$$=$$filters.stripWhitespace($$);';
     if (options.stripEmptyMeta !== false && hasContentAttribute)

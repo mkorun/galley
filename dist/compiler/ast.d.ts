@@ -57,7 +57,6 @@ export interface OutputNode extends NodeBase {
     readonly expression: Expression;
     readonly raw: boolean;
     readonly emptyAttribute?: 'content' | 'href';
-    readonly urlAttribute?: string;
 }
 export interface ConstNode extends NodeBase {
     readonly kind: 'const';
