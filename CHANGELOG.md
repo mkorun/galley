@@ -3,6 +3,12 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2] — 2026-10-26
+
+### Fixed
+
+- `{@raw}` with a value that is not a string (a number, a boolean) threw `w.lastIndexOf is not a function` in 0.3.1; it is written as its string form again.
+
 ## [0.3.1] — 2026-10-26
 
 ### Fixed

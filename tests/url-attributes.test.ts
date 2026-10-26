@@ -43,4 +43,10 @@ describe('URL attributes', () => {
 		for (const t of ['<a href="/a/{#if author}{ author.url }{/if}">x</a>', '<a href="x" title="{ u }">x</a>', '<a href="x">{ u }</a>'])
 			expect(await render(t, data)).toContain('javascript:alert(1)')
 	})
+
+	// review 2026-10-26 (hadley, dev server): 0.3.1 handed a raw number to a helper that needs a string
+	test('write a raw value that is no string, as before', async () => {
+		expect(await render('<p>{@raw n}</p>', { n: 42 })).toBe('<p>42</p>')
+		expect(await render('<p>{@raw b}{@raw o}</p>', { b: true, o: { toString: () => '<b>x</b>' } })).toBe('<p>true<b>x</b></p>')
+	})
 })
