@@ -20,6 +20,8 @@ const collectExpressionMetadata = (expression, used) => {
                 collectExpressionMetadata(argument, used);
     }
 };
+// An output that begins the value of an attribute holding a URL, in an open tag: the scheme is its to decide.
+const URL_ATTRIBUTE_START = /^<[a-z][^<>]*\s(href|src|action|formaction|poster|cite|xlink:href)=["']?$/i;
 export const analyze = (ast, dynamicEmptyAttributes = true) => {
     const annotate = (nodes, metadata) => {
         let recentText = '';
@@ -32,14 +34,19 @@ export const analyze = (ast, dynamicEmptyAttributes = true) => {
             if (node.kind === 'output') {
                 if (metadata)
                     collectExpressionMetadata(node.expression, metadata);
+                const openTag = recentText.slice(recentText.lastIndexOf('<'));
                 if (dynamicEmptyAttributes) {
-                    const openTag = recentText.slice(recentText.lastIndexOf('<'));
                     const tagInitial = openTag.charCodeAt(1) | 32;
                     if (tagInitial === 109 && /^<meta\b[^>]*\bcontent=(?:"[^"]*|'[^']*)$/i.test(openTag))
                         annotated = { ...node, emptyAttribute: 'content' };
                     else if (tagInitial === 108 && /^<link\b[^>]*\bhref=(?:"[^"]*|'[^']*)$/i.test(openTag))
                         annotated = { ...node, emptyAttribute: 'href' };
                 }
+                const url = URL_ATTRIBUTE_START.exec(openTag);
+                if (url)
+                    annotated = { ...annotated, urlAttribute: url[1].toLowerCase() };
+                // what an output wrote is not the start of the attribute value any more
+                recentText += '\u0000';
             }
             else if (node.kind === 'const') {
                 if (metadata)

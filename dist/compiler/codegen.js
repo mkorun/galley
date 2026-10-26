@@ -1,4 +1,11 @@
 import { fail } from './diagnostics.js';
+/**
+ * The check of a value that begins a URL attribute (analysis.ts), as the generated render function runs it: read as a
+ * browser reads a URL (leading controls and spaces dropped, tabs and newlines removed), it is relative or has the
+ * scheme http, https, mailto or tel, and names no other host without a scheme (`//host`, `\\host`); anything else
+ * stops the render with error G5001.
+ */
+const URL_CHECK = String.raw `const $$url=(v,a)=>{if(v==null)return v;const s=String(v),t=s.replace(/^[\u0000-\u0020]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(t)?!/^(?:https?|mailto|tel):/i.test(t):/^[\\/][\\/]/.test(t))throw new Error('G5001: '+a+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};`;
 const escapeJs = (value) => /[\\'\n\r\u2028\u2029]/.test(value)
     ? value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
         .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
@@ -43,7 +50,7 @@ export const generate = (ast, options = {}) => {
     if (options.debug)
         body += '// [galley] AST compiler debug output\n';
     const markerOpen = '\uE000galley-meta\uE001', markerClose = '\uE002galley-meta\uE003';
-    let hasContentAttribute = false, hasHrefAttribute = false;
+    let hasContentAttribute = false, hasHrefAttribute = false, hasUrlAttribute = false;
     let sequence = 0;
     let isAsync = false;
     const emitNodes = (nodes, scope, buffer) => {
@@ -61,10 +68,14 @@ export const generate = (ast, options = {}) => {
                         hasHrefAttribute = true;
                     if (node.emptyAttribute)
                         body += `${buffer}+='${markerOpen}';`;
+                    // a value that begins a URL attribute is checked before it is written (URL_CHECK)
+                    const checked = node.urlAttribute ? `$$url(${expr},'${node.urlAttribute}')` : expr;
+                    if (node.urlAttribute)
+                        hasUrlAttribute = true;
                     if (node.raw)
-                        body += `${buffer}+=(${expr}??'');`;
+                        body += `${buffer}+=(${checked}??'');`;
                     else
-                        body += `{const ${value}=${expr};${buffer}+=${value}==null?'':String(${value}).replace(/[&<>'"]/g,c=>$$html[c]);}`;
+                        body += `{const ${value}=${checked};${buffer}+=${value}==null?'':String(${value}).replace(/[&<>'"]/g,c=>$$html[c]);}`;
                     if (node.emptyAttribute)
                         body += `${buffer}+='${markerClose}';`;
                     break;
@@ -137,6 +148,9 @@ export const generate = (ast, options = {}) => {
     // '$' is seeded as an always-in-scope root so a path rooted at exactly "$"
     // addresses the data parameter itself, not a property literally named "$".
     emitNodes(ast.children, ['$'], '$$');
+    // after the directive, which must stay the first statement
+    if (hasUrlAttribute)
+        body = body.replace("'use strict';", () => `'use strict';${URL_CHECK}`);
     if (options.strip)
         body += '$$=$$filters.stripWhitespace($$);';
     if (options.stripEmptyMeta !== false && hasContentAttribute)

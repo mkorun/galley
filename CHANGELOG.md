@@ -3,6 +3,12 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] — 2026-10-26
+
+### Added
+
+- A value that begins a URL attribute (`href`, `src`, `action`, `formaction`, `poster`, `cite`, `xlink:href`) must be relative or start with `http:`, `https:`, `mailto:` or `tel:`; anything else, and `//host`, stops the render with `G5001`. Data could put `javascript:` into a link before. A template whose data holds such a URL on purpose must write it some other way.
+
 ## [0.2.0] — 2026-10-24
 
 ### Changed

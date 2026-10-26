@@ -148,6 +148,8 @@ HTML-escapes the value. Safe for user input and metadata.
 
 Every value is turned into a string first (`String(value)`; `null` and `undefined` give an empty string), then its special characters are escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `'` → `&apos;`, `"` → `&quot;`. Arrays and objects are escaped too.
 
+**In a URL attribute:** a value that begins the value of `href`, `src`, `action`, `formaction`, `poster`, `cite` or `xlink:href` must be a relative URL or start with `http:`, `https:`, `mailto:` or `tel:`, read as a browser reads it (leading spaces and controls, tabs and newlines do not count); a URL of another host without a scheme (`//host`, `\\host`) is refused as well. Anything else stops the render with error `G5001`, so data cannot put `javascript:` into a link. A value later in the attribute (`href="/tags/{ tag }/"`) cannot change the scheme and is not checked. `{@raw}` is checked the same way.
+
 **With fallback:**
 
 ```html
@@ -555,6 +557,8 @@ with output verification is maintained under `private/bench/`.
 ---
 
 ## Known Limitations
+
+- **The URL attribute check (`G5001`) is a text heuristic, like `stripEmptyMeta`.** It recognizes an output that directly follows `href="`, `src='` and the other URL attributes inside an open tag. An attribute value assembled in a `{#if}` block, a list of URLs (`srcset`) and URLs in CSS are not checked; a Content Security Policy is what keeps script out of a page.
 
 - **`stripEmptyMeta` is a text heuristic, not an HTML parser.** It recognizes `<meta ... content="...">` and `<link ... href="...">` immediately preceding a dynamic value and removes the tag only if every dynamic piece of that attribute resolved to nothing. It does not understand HTML structure beyond that shape — content that happens to look like one of these tags outside real markup (inside a `<pre>` block, for example) is not specially excluded.
 - **Misspelled or unregistered pipe names compile without complaint unless you opt in.** Filters are resolved at render time (`tpl.render(data, filters)`), not compile time, so galley cannot know your filter set unless you tell it: pass `knownFilters` (to `galley()` or `lint()`) to get a `G3001` warning for typos like `slugfiy`. Without it, a typo surfaces as a runtime `TypeError` with no source location.
