@@ -3,6 +3,12 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.3] — 2026-10-28
+
+### Fixed
+
+- `!` bound looser than the binary operators: `{#if !a || b}` was read as `!(a || b)`, and so were `!a && b` and `!a === b`. It now binds tighter than all of them, as in JavaScript; `!(a || b)` still negates the group.
+
 ## [0.3.2] — 2026-10-26
 
 ### Fixed

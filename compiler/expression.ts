@@ -85,11 +85,6 @@ const parsePipe = (raw: string, at: SourceSpan): PipeCall => {
 const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 	const { text: raw, span: at } = trimSpan(rawInput, atInput)
 	if (!raw) fail('G1100', 'Expected an expression', at)
-	if (raw.startsWith('!')) {
-		const operandAt = span(at.source, at.start + 1, at.end)
-		const node: UnaryExpression = { kind: 'unary', operator: '!', operand: parseCore(raw.slice(1), operandAt), span: at }
-		return node
-	}
 	if (hasOuterParentheses(raw)) return parseCore(raw.slice(1, -1), span(at.source, at.start + 1, at.end - 1))
 	const literalNode = literal(raw, at)
 	if (literalNode) return literalNode
@@ -117,6 +112,12 @@ const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 		const leftAt = span(at.source, at.start, at.start + position)
 		const rightAt = span(at.source, at.start + position + operator.length, at.end)
 		return { kind: 'binary', operator, left: parseCore(raw.slice(0, position), leftAt), right: parseCore(raw.slice(position + operator.length), rightAt), span: at }
+	}
+	// ! binds tighter than every binary operator, as in JavaScript: it is taken only once none is left at the top level
+	if (raw.startsWith('!')) {
+		const operandAt = span(at.source, at.start + 1, at.end)
+		const node: UnaryExpression = { kind: 'unary', operator: '!', operand: parseCore(raw.slice(1), operandAt), span: at }
+		return node
 	}
 	return parsePath(raw, at)
 }

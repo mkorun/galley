@@ -231,6 +231,24 @@ describe('{#if} logical operators — && and ||', () => {
 		expect(await render('{#if a || b && c}yes{/if}', { a: true, b: false, c: false })).toBe('yes')
 	})
 
+	test('! binds tighter than || and &&', async () => {
+		expect(await render('{#if !a || b}yes{:else}no{/if}', { a: false, b: true })).toBe('yes')
+		expect(await render('{#if !a || b}yes{:else}no{/if}', { a: true, b: false })).toBe('no')
+		expect(await render('{#if !a && b}yes{:else}no{/if}', { a: false, b: false })).toBe('no')
+		expect(await render('{#if b || !a}yes{:else}no{/if}', { a: true, b: false })).toBe('no')
+		expect(await render('{#if !a || !b}yes{:else}no{/if}', { a: true, b: false })).toBe('yes')
+	})
+
+	test('! binds tighter than comparisons', async () => {
+		expect(await render('{#if !a === true}yes{:else}no{/if}', { a: false })).toBe('yes')
+		expect(await render('{#if !a === true}yes{:else}no{/if}', { a: true })).toBe('no')
+	})
+
+	test('!( … ) negates the whole group', async () => {
+		expect(await render('{#if !(a || b)}yes{:else}no{/if}', { a: false, b: true })).toBe('no')
+		expect(await render('{#if !(a || b)}yes{:else}no{/if}', { a: false, b: false })).toBe('yes')
+	})
+
 	test('! combined with &&', async () => {
 		expect(await render('{#if !a && b}yes{/if}', { a: false, b: true })).toBe('yes')
 		expect(await render('{#if !a && b}yes{/if}', { a: true, b: true })).toBe('')
