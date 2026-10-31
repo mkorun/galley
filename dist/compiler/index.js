@@ -6,35 +6,38 @@ import { parse } from './parser.js';
 export { GalleyDiagnosticError, formatDiagnostic, locate } from './diagnostics.js';
 export { lex } from './lexer.js';
 export { parse } from './parser.js';
-const HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;' };
+const HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;', '\uE000': '&#xE000;', '\uE001': '&#xE001;', '\uE002': '&#xE002;', '\uE003': '&#xE003;' };
 const expandPartials = async (ast, options) => {
     const containsPartial = (nodes) => nodes.some(node => node.kind === 'partial'
         || (node.kind === 'if' && node.branches.some(branch => containsPartial(branch.children)))
         || ((node.kind === 'each' || node.kind === 'snippet') && containsPartial(node.children)));
     if (!containsPartial(ast.children))
         return ast;
-    const expand = async (nodes) => {
+    // chain: the partials open around these nodes, so that one that includes itself is named, not followed for ever
+    const expand = async (nodes, chain) => {
         const result = [];
         for (const node of nodes) {
             if (node.kind === 'partial') {
                 if (!options.includes)
                     throw new GalleyDiagnosticError({ code: 'G5001', severity: 'error', message: `Cannot load partial ${JSON.stringify(node.path)} without an include resolver`, span: node.span, help: 'Pass options.includes.import when the template uses {@partial}.' });
                 const path = `${options.includes.basedir ?? '.'}/${node.path}`;
+                if (chain.includes(path))
+                    throw new GalleyDiagnosticError({ code: 'G4003', severity: 'error', message: `Partial ${JSON.stringify(node.path)} includes itself: ${[...chain, path].join(' → ')}`, span: node.span });
                 const text = await options.includes.import(path, 'utf-8');
                 const source = { id: path, text };
-                result.push(...await expand(parse(source).children));
+                result.push(...await expand(parse(source).children, [...chain, path]));
             }
             else if (node.kind === 'if') {
-                result.push({ ...node, branches: await Promise.all(node.branches.map(async (branch) => ({ ...branch, children: await expand(branch.children) }))) });
+                result.push({ ...node, branches: await Promise.all(node.branches.map(async (branch) => ({ ...branch, children: await expand(branch.children, chain) }))) });
             }
             else if (node.kind === 'each' || node.kind === 'snippet')
-                result.push({ ...node, children: await expand(node.children) });
+                result.push({ ...node, children: await expand(node.children, chain) });
             else
                 result.push(node);
         }
         return result;
     };
-    return { ...ast, children: await expand(ast.children) };
+    return { ...ast, children: await expand(ast.children, []) };
 };
 export const lint = (template, options = {}) => {
     try {

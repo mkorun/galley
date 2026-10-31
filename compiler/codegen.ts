@@ -1,5 +1,6 @@
 import type { Expression, PathExpression, TemplateAst, TemplateNode } from './ast.js'
 import { fail } from './diagnostics.js'
+import type { SourceSpan } from './types.js'
 
 export interface GeneratedProgram { readonly body: string; readonly async: boolean }
 
@@ -13,7 +14,14 @@ export interface GeneratedProgram { readonly body: string; readonly async: boole
  * came before the value in the attribute counts, however it got there: text, other values, values written in an
  * {#if} or by a snippet.
  */
-const URL_CHECK = String.raw`const $$urlTag=/^<[a-z][^\s\/>]*(?:\s+[^\s"'>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\x60]+))?)*\s+(href|src|action|formaction|poster|cite|xlink:href)\s*=\s*(?:"([^"]*)|'([^']*)|([^\s"'=<>\x60]*))$/i;const $$url=(t,v)=>{if(v==null||v===''||t[0]!=='<'||t.indexOf('=')<0)return v;const m=$$urlTag.exec(t);if(!m)return v;const s=(m[2]??m[3]??m[4]??'')+String(v),u=s.replace(/^[\u0000- ]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(u)?!/^(?:https?|mailto|tel):/i.test(u):/^[\\/][\\/]/.test(u))throw new Error('G5001: '+m[1].toLowerCase()+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};const $$tail=(t,w)=>{w=String(w);const k=w.lastIndexOf('<');return k<0?t+w:w.slice(k)};`
+const URL_CHECK = String.raw`const $$urlTag=/^<[a-z][^\s\/>]*(?:\s+[^\s"'>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\x60]+))?)*\s+(href|src|action|formaction|poster|cite|xlink:href)\s*=\s*(?:"([^"]*)|'([^']*)|([^\s"'=<>\x60]*))$/i;const $$url=(t,v)=>{if(v==null||v===''||t[0]!=='<'||t.indexOf('=')<0)return v;const m=$$urlTag.exec(t);if(!m)return v;const s=(m[2]??m[3]??m[4]??'')+String(v),u=s.replace(/^[\u0000- ]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(u)?!/^(?:https?|mailto|tel):/i.test(u):/^[\\/][\\/]/.test(u))throw new Error('G5001: '+m[1].toLowerCase()+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};const $$tail=(t,w)=>{w=String(w);const k=w.lastIndexOf('<');return k<0?t+w:w.slice(k)};const $$str=v=>{try{return String(v)}catch{return Object.prototype.toString.call(v)}};const $$raw=v=>v==null?v:$$str(v).replace(/[\uE000-\uE003]/g,c=>$$html[c]);`
+
+/** The globals the generated code calls. A template that names one for all of its render would change what it does. */
+const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array'])
+
+const notGenerated = (name: string, at: SourceSpan): void => {
+	if (GENERATED_GLOBALS.has(name)) fail('G3007', `The name ${name} is needed by the generated code`, at)
+}
 
 const escapeJs = (value: string): string => /[\\'\n\r\u2028\u2029]/.test(value)
 	? value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
@@ -79,13 +87,16 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					if (node.emptyAttribute === 'content') hasContentAttribute = true
 					if (node.emptyAttribute === 'href') hasHrefAttribute = true
 					if (node.emptyAttribute) body += `${buffer}+='${markerOpen}';`
-					// checked before it is written, with what its open tag holds (URL_CHECK); an escaped value holds no <
-					if (node.raw) body += `{const ${value}=$$url(${buffer}t,${expr})??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`
-					else body += `{const ${value}=${expr};if(${value}!=null){const e=$$url(${buffer}t,String(${value}).replace(/[&<>'"]/g,c=>$$html[c]));${buffer}+=e;${buffer}t+=e;}}`
+					// checked before it is written, with what its open tag holds (URL_CHECK); an escaped value holds no <. The
+					// marks of stripEmptyMeta, which leave the text after this check, are written as references: no value makes one
+					if (node.raw) body += `{const ${value}=$$url(${buffer}t,$$raw(${expr}))??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`
+					else body += `{const ${value}=${expr};if(${value}!=null){const e=$$url(${buffer}t,$$str(${value}).replace(/[&<>'"\\uE000-\\uE003]/g,c=>$$html[c]));${buffer}+=e;${buffer}t+=e;}}`
 					if (node.emptyAttribute) body += `${buffer}+='${markerClose}';`
 					break
 				}
-				case 'const': body += `const ${node.name}=(${expressionCode(node.expression, scope)}??'');`; scope.push(node.name); break
+				case 'const':
+					notGenerated(node.name, node.span)
+					body += `const ${node.name}=(${expressionCode(node.expression, scope)}??'');`; scope.push(node.name); break
 				case 'if': {
 					node.branches.forEach((branch, index) => {
 						body += index === 0 ? `if(${expressionCode(branch.condition!, scope)}){` : branch.condition ? `else if(${expressionCode(branch.condition, scope)}){` : 'else{'
@@ -113,6 +124,7 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					break
 				}
 				case 'snippet': {
+					notGenerated(node.name, node.span)
 					const snippetBuffer = `$$s${++sequence}`
 					body += `function ${node.name}(${node.param ?? ''}){let ${snippetBuffer}='',${snippetBuffer}t='';`
 					const childScope = scope.slice(); if (node.param) childScope.push(node.param)

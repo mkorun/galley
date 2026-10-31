@@ -3,6 +3,24 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.4] — 2026-10-31
+
+### Security
+
+- A value that held the marks of `stripEmptyMeta` could pass the check of URL attributes (`G5001`) and lose them
+  afterwards, which wrote `href="javascript:…"` from a value, in any template with a value in `<meta content>` or
+  `<link href>`. The four characters U+E000 to U+E003 of a value are now written as character references.
+
+### Changed
+
+- A partial that includes itself stops with `G4003` and names the chain; it filled the memory or hung.
+- `{@const}` and `{#snippet}` may not take the name `String`, `Object` or `Array`, which the generated code calls (`G3007`):
+  a snippet of that name turned the check of URL attributes off.
+
+### Fixed
+
+- An object whose `toString` is no function stopped the render with `No default value`.
+
 ## [0.3.3] — 2026-10-28
 
 ### Fixed

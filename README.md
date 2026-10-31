@@ -139,7 +139,8 @@ enforce their own filesystem boundary before reading a file.
 
 ### `{ variable }` — Escaped output
 
-HTML-escapes the value. Safe for user input and metadata.
+HTML-escapes the value. Safe for user input and metadata in element text and in quoted attribute values; see
+[Known Limitations](#known-limitations) for the places where it is not.
 
 ```html
 <h1>{ meta.title }</h1>
@@ -559,6 +560,8 @@ with output verification is maintained under `private/bench/`.
 ## Known Limitations
 
 - **The URL attribute check (`G5001`) reads the open tag the output so far ends in.** It checks each value as it is written, with what the attribute holds before it; text the template writes after a value is its own and is not checked (`href="{ x }script:…"`). A list of URLs (`srcset`) and URLs in CSS are not checked; a Content Security Policy is what keeps script out of a page.
+
+- **`{ }` escapes for HTML, not for every context.** It is safe in element text and in attribute values in quotes. It does not make a value safe in `<script>`, `<style>`, an `on*`, `style` or `srcdoc` attribute, or an attribute value without quotes: a template that writes untrusted values there is not protected.
 
 - **`stripEmptyMeta` is a text heuristic, not an HTML parser.** It recognizes `<meta ... content="...">` and `<link ... href="...">` immediately preceding a dynamic value and removes the tag only if every dynamic piece of that attribute resolved to nothing. It does not understand HTML structure beyond that shape — content that happens to look like one of these tags outside real markup (inside a `<pre>` block, for example) is not specially excluded.
 - **Misspelled or unregistered pipe names compile without complaint unless you opt in.** Filters are resolved at render time (`tpl.render(data, filters)`), not compile time, so galley cannot know your filter set unless you tell it: pass `knownFilters` (to `galley()` or `lint()`) to get a `G3001` warning for typos like `slugfiy`. Without it, a typo surfaces as a runtime `TypeError` with no source location.
