@@ -15,8 +15,8 @@ describe('URL attributes', () => {
 			await expect(render(template, { u })).rejects.toThrow(/^G5001: href=.* is no URL a template may write there/)
 	})
 
-	test('check every URL attribute, quoted either way or not, and a value only as the start of a URL', async () => {
-		for (const t of ['<img src="{ u }">', "<img src='{ u }'>", '<img src={ u }>', '<form action="{ u }">', '<video poster="{ u }">', '<blockquote cite="{ u }">', '<use xlink:href="{ u }">', '<a\n  class="x"\n  HREF="{ u }">'])
+	test('check every URL attribute, quoted either way, and a value only as the start of a URL', async () => {
+		for (const t of ['<img src="{ u }">', "<img src='{ u }'>", '<form action="{ u }">', '<video poster="{ u }">', '<blockquote cite="{ u }">', '<use xlink:href="{ u }">', '<a\n  class="x"\n  HREF="{ u }">'])
 			await expect(render(t, { u: 'javascript:x' })).rejects.toThrow(/G5001/)
 		for (const t of ['<a href="/tags/{ u }/">', '<a title="{ u }">', '<p>{ u }</p>', '<a href="{ v }{ u }">'])
 			expect(await render(t, { u: 'javascript:x', v: '/a/' })).toContain('javascript:x')

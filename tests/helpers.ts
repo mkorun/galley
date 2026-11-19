@@ -1,3 +1,5 @@
+import { spyOn } from 'bun:test'
+import { UrlPrefix } from '../compiler/url.js'
 import galley from './compiler'
 import util from '../util'
 
@@ -30,3 +32,6 @@ export const renderCode = async (
 }
 
 export { util }
+
+/** Observe actual character reads without shipping a counter in the URL checker. */
+export const countUrlReads = (prefix: UrlPrefix) => spyOn(prefix as unknown as { read(code: number): void }, 'read')

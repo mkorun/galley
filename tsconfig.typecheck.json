@@ -1,0 +1,5 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": { "noEmit": true },
+	"include": ["index.ts", "util.ts", "types.ts", "compiler/**/*.ts", "differential/**/*.ts", "tests/bench/**/*.ts", "tests/support/**/*.ts"]
+}

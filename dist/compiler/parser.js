@@ -1,25 +1,50 @@
 import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
 import { parseExpression } from './expression.js';
 import { lex } from './lexer.js';
+import { textSpans } from './text.js';
 import { parsePath } from './path.js';
 const expressionSpan = (token, raw) => {
     const local = token.value.indexOf(raw);
     const start = local < 0 ? token.span.start : token.valueStart + local;
     return span(token.span.source, start, local < 0 ? token.span.end : start + raw.length);
 };
+/** Lexical removals and ADR-015 can leave a seam inside literal HTML. Read it as one text. */
+const joinTexts = (nodes) => {
+    const result = [];
+    let joinedSpans = null;
+    for (const node of nodes) {
+        const last = result[result.length - 1];
+        if (node.kind === 'text' && last?.kind === 'text') {
+            joinedSpans ??= [...textSpans(last)];
+            for (const part of textSpans(node))
+                joinedSpans.push(part);
+            result[result.length - 1] = { ...last, value: last.value + node.value, sourceSpans: joinedSpans, span: span(last.span.source, last.span.start, node.span.end) };
+        }
+        else {
+            result.push(node);
+            joinedSpans = null;
+        }
+    }
+    return result;
+};
 export const parseTokens = (source, input) => {
     const tokens = [...input];
     // ADR-014 as a token transform: structural tags on otherwise empty lines do
     // not leak their indentation/newline into the semantic AST.
+    let sourceLineStart = 0, nextNewline = source.text.indexOf('\n');
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         if (!token || (token.kind !== 'block-open' && token.kind !== 'block-close' && token.kind !== 'continuation'))
             continue;
         const previous = tokens[i - 1];
         const next = tokens[i + 1];
-        const previousText = previous?.kind === 'text' ? previous.value : '';
-        const lineStart = previousText.lastIndexOf('\n') + 1;
-        let before = lineStart;
+        // Use the source line: a preceding expression is not an empty line.
+        while (nextNewline >= 0 && nextNewline < token.span.start) {
+            sourceLineStart = nextNewline + 1;
+            nextNewline = source.text.indexOf('\n', sourceLineStart);
+        }
+        const previousText = source.text.slice(sourceLineStart, token.span.start);
+        let before = 0;
         while (previousText.charCodeAt(before) === 32 || previousText.charCodeAt(before) === 9)
             before++;
         if (before !== previousText.length || next?.kind !== 'text')
@@ -34,7 +59,7 @@ export const parseTokens = (source, input) => {
         else
             continue;
         if (previous?.kind === 'text') {
-            const value = lineStart === 0 ? '' : previous.value.slice(0, lineStart);
+            const value = previous.value.slice(0, previous.value.length - previousText.length);
             tokens[i - 1] = { ...previous, value };
         }
         tokens[i + 1] = { ...next, value: next.value.slice(after), valueStart: next.valueStart + after };
@@ -45,11 +70,11 @@ export const parseTokens = (source, input) => {
         while (cursor < tokens.length) {
             const token = tokens[cursor] ?? fail('G2999', 'Internal parser cursor escaped the token stream', astSpan);
             if ((token.kind === 'block-close' && token.value === closing) || (continuations && token.kind === 'continuation' && (token.value === 'else' || token.value.startsWith('else if '))))
-                return { children, stop: token };
+                return { children: joinTexts(children), stop: token };
             cursor++;
             switch (token.kind) {
                 case 'text':
-                    children.push({ kind: 'text', value: token.value, span: token.span });
+                    children.push({ kind: 'text', value: token.value, span: span(source, token.valueStart, token.valueStart + token.value.length) });
                     break;
                 case 'expression': {
                     try {
@@ -78,7 +103,7 @@ export const parseTokens = (source, input) => {
                 case 'continuation': return fail('G2002', `Continuation tag {:${token.value}} is only valid inside {#if}`, token.span);
             }
         }
-        return { children, stop: null };
+        return { children: joinTexts(children), stop: null };
     };
     const parseDirective = (token) => {
         const space = token.value.search(/\s/);
@@ -91,6 +116,8 @@ export const parseTokens = (source, input) => {
                     fail('G2101', '{@raw} requires an expression', token.span, 'Example: {@raw markup}');
                 return { kind: 'output', expression: parseExpression(arg, at), raw: true, span: token.span };
             case 'partial':
+                if (!source.text.startsWith('{@partial', token.span.start))
+                    fail('G4002', 'Whitespace after @ is not supported for {@partial}', token.span, 'Write {@partial path} without whitespace after @.');
                 if (!arg)
                     fail('G2102', '{@partial} requires a path', token.span);
                 if (arg.includes('\0') || /^(?:[/\\]|[A-Za-z]:)/.test(arg) || arg.split(/[/\\]/).includes('..'))

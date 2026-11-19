@@ -81,8 +81,6 @@ const hasOuterParentheses = (raw) => {
             depth--;
             if (depth === 0 && i !== raw.length - 1)
                 return false;
-            if (depth < 0)
-                return false;
         }
     }
     return depth === 0 && !quote;

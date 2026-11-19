@@ -13,9 +13,13 @@ export const locate = (source, offset) => {
 export const formatDiagnostic = (diagnostic) => {
     const { source, start } = diagnostic.span;
     const { line, column } = locate(source, start);
-    const lines = source.text.split('\n');
-    const text = lines[line - 1] ?? '';
-    const pointer = `${' '.repeat(Math.max(0, column - 1))}^`;
+    const lineStart = start - column + 1;
+    const from = Math.max(lineStart, start - 40);
+    const newline = source.text.indexOf('\n', start);
+    const to = Math.min(newline < 0 ? source.text.length : newline, from + 120);
+    const prefix = from > lineStart ? '…' : '';
+    const text = prefix + source.text.slice(from, to) + (to < (newline < 0 ? source.text.length : newline) ? '…' : '');
+    const pointer = `${' '.repeat(prefix.length + start - from)}^`;
     const help = diagnostic.help ? `\nhelp: ${diagnostic.help}` : '';
     return `[galley:${diagnostic.code}] ${source.id}:${line}:${column} (line ${line}, col ${column}): ${diagnostic.message}\n${text}\n${pointer}${help}`;
 };

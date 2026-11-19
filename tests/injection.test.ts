@@ -138,7 +138,7 @@ describe('special path roots remain data keys, never generated JavaScript', () =
 
 	test('colon root uses safe key access and lint remains side-effect free', async () => {
 		expect(await render('{og:title}', { 'og:title': 'Open Graph' })).toBe('Open Graph')
-		expect(lint('{a+process.env.SECRET}')).toEqual([])
+		expect(await lint('{a+process.env.SECRET}')).toEqual([])
 	})
 
 	test('bare "$" root addresses the context object, not a JavaScript binding, and does not reopen injection', async () => {

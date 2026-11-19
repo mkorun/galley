@@ -122,3 +122,16 @@ describe('ADR-014 — bidirectional whitespace stripping', () => {
 	})
 
 })
+
+ test('G-22 ADR-014: inline expressions and blocks retain their following newline', async () => {
+	expect(await render('{ x }{#if p}\nhello{/if}', { x: 'A', p: true })).toBe('A\nhello')
+	expect(await render('<a{#if p}{/if}\nhref="/ok">')).toBe('<a\nhref="/ok">')
+ })
+ test('G-20 strip runs before reading and preserves dynamic whitespace', async () => {
+	const galley = (await import('../index.js')).default
+	const util = (await import('../util.js')).default
+	const blocked = await galley('<a hr\nef="{ u }">', { strip: true })
+	expect(() => blocked.render({ u: 'javascript:x' }, util)).toThrow('G5001')
+	const template = await galley('{@const n = 1}{#snippet s()}<i> x </i>{/snippet}{#if p}<b>{ v }</b>{/if}{#each xs as x}<i>{ x }</i>{/each}{@partial p.sort}<p>  ', { strip: true, includes: { import: async () => '<em>\nx</em>' } })
+	expect(await template.render({ p: true, v: '\n  < x', xs: ['\n '] }, util)).toBe('<b>\n  &lt; x</b><i>\n </i><em>x</em><p>')
+ })

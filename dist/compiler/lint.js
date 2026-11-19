@@ -1,9 +1,12 @@
+/** Names used by generated runtime calls must not be shadowed by template declarations. */
+const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError']);
 export const lintAst = (ast, options = {}) => {
     const diagnostics = [];
     const declarations = new Set();
     const used = new Set();
     const duplicate = new Set();
     const report = (diagnostic) => diagnostics.push(diagnostic);
+    // parseCore builds pipe inputs and unary/binary operands without pipes; only arguments can nest pipes.
     const expression = (expr) => {
         if (expr.kind === 'pipe') {
             for (const pipe of expr.pipes) {
@@ -12,14 +15,7 @@ export const lintAst = (ast, options = {}) => {
                 for (const arg of pipe.args)
                     expression(arg);
             }
-            expression(expr.input);
         }
-        else if (expr.kind === 'binary') {
-            expression(expr.left);
-            expression(expr.right);
-        }
-        else if (expr.kind === 'unary')
-            expression(expr.operand);
     };
     const resolve = (scope, name) => {
         for (let current = scope; current; current = current.parent) {
@@ -27,23 +23,33 @@ export const lintAst = (ast, options = {}) => {
             if (snippet)
                 return snippet;
         }
-        return null;
+        return undefined;
     };
-    const visit = (nodes, parent) => {
-        const local = new Map();
-        for (const node of nodes) {
-            if (node.kind !== 'snippet')
-                continue;
-            declarations.add(node);
-            if (local.has(node.name)) {
-                duplicate.add(node);
-                report({ code: 'G3003', severity: 'error', message: `Duplicate snippet ${JSON.stringify(node.name)} in the same block`, span: node.span, help: 'Rename one snippet or move it to a different lexical block.' });
+    const visit = (nodes, parent, sameScope = false) => {
+        const local = sameScope ? parent.snippets : new Map();
+        const declare = (items) => {
+            for (const node of items) {
+                if (node.kind === 'partial' && node.children) {
+                    declare(node.children);
+                    continue;
+                }
+                if (node.kind !== 'snippet')
+                    continue;
+                declarations.add(node);
+                if (local.has(node.name)) {
+                    duplicate.add(node);
+                    report({ code: 'G3003', severity: 'error', message: `Duplicate snippet ${JSON.stringify(node.name)} in the same block`, span: node.span, help: 'Rename one snippet or move it to a different lexical block.' });
+                }
+                else
+                    local.set(node.name, node);
             }
-            else
-                local.set(node.name, node);
-        }
-        const scope = { parent, snippets: local };
+        };
+        if (!sameScope)
+            declare(nodes);
+        const scope = sameScope ? parent : { parent, snippets: local };
         for (const node of nodes) {
+            if ((node.kind === 'const' || node.kind === 'snippet') && GENERATED_GLOBALS.has(node.name))
+                report({ code: 'G3007', severity: 'error', message: `The name ${node.name} is needed by the generated code`, span: node.span });
             switch (node.kind) {
                 case 'output':
                     expression(node.expression);
@@ -62,6 +68,10 @@ export const lintAst = (ast, options = {}) => {
                     break;
                 case 'each':
                     visit(node.children, scope);
+                    break;
+                case 'partial':
+                    if (node.children)
+                        visit(node.children, scope, true);
                     break;
                 case 'snippet':
                     visit(node.children, scope);

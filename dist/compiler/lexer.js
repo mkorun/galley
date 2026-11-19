@@ -5,7 +5,28 @@ export const lex = (source) => {
     const tokens = [];
     const text = source.text;
     let cursor = 0;
+    let nextBrace = text.indexOf('{'), nextAngle = text.indexOf('<');
     let textStart = 0;
+    let lineIsWhitespace = true;
+    let lineStart = 0, newline = -1, nextNewline = text.indexOf('\n');
+    const inspectLine = () => {
+        while (nextNewline >= 0 && nextNewline < cursor) {
+            newline = nextNewline;
+            nextNewline = text.indexOf('\n', newline + 1);
+        }
+        // Newlines inside a removed config do not move the beginning of the emitted line.
+        if (newline >= textStart) {
+            lineStart = newline + 1;
+            return text.slice(lineStart, cursor).trim() === '';
+        }
+        return lineIsWhitespace && text.slice(textStart, cursor).trim() === '';
+    };
+    const configEnd = (at) => {
+        if (!text.startsWith('<galley:config>', at))
+            return -1;
+        const close = text.indexOf('</galley:config>', at + 15);
+        return close < 0 ? -1 : close + 16;
+    };
     const pushText = (end) => {
         if (end > textStart)
             tokens.push({ kind: 'text', value: text.slice(textStart, end), valueStart: textStart, span: span(source, textStart, end) });
@@ -13,38 +34,59 @@ export const lex = (source) => {
     while (cursor < text.length) {
         const current = text.charCodeAt(cursor);
         if (current !== 123 && current !== 60) {
-            const brace = text.indexOf('{', cursor + 1);
-            const angle = text.indexOf('<', cursor + 1);
+            if (nextBrace >= 0 && nextBrace < cursor)
+                nextBrace = text.indexOf('{', cursor + 1);
+            if (nextAngle >= 0 && nextAngle < cursor)
+                nextAngle = text.indexOf('<', cursor + 1);
+            const brace = nextBrace, angle = nextAngle;
             if (brace < 0)
                 cursor = angle < 0 ? text.length : angle;
             else
                 cursor = angle < 0 ? brace : Math.min(brace, angle);
             continue;
         }
-        if (text.startsWith('<galley:config>', cursor)) {
-            const close = text.indexOf('</galley:config>', cursor + 15);
-            if (close >= 0) {
-                pushText(cursor);
-                cursor = close + 16;
-                textStart = cursor;
-                continue;
-            }
+        const config = configEnd(cursor);
+        if (config >= 0) {
+            pushText(cursor);
+            lineIsWhitespace = inspectLine();
+            cursor = config;
+            textStart = cursor;
+            continue;
         }
         if (text.startsWith('<!--', cursor)) {
             const close = text.indexOf('-->', cursor + 4);
-            const previousNewline = text.lastIndexOf('\n', cursor - 1);
-            if (close >= 0 && text.slice(previousNewline + 1, cursor).trim() === '') {
+            if (close >= 0 && inspectLine()) {
                 let after = close + 3;
-                while (text[after] === ' ' || text[after] === '\t')
-                    after++;
+                while (true) {
+                    while (text[after] === ' ' || text[after] === '\t')
+                        after++;
+                    const config = configEnd(after);
+                    if (config < 0)
+                        break;
+                    after = config;
+                }
                 if (after === text.length || text[after] === '\n' || (text[after] === '\r' && text[after + 1] === '\n')) {
-                    pushText(after === text.length ? Math.max(0, previousNewline) : previousNewline + 1);
+                    const end = after === text.length ? Math.max(0, lineStart - (text[lineStart - 2] === '\r' ? 2 : 1)) : lineStart;
+                    pushText(end);
+                    // A removed config may already have emitted this line's indentation or preceding newline.
+                    while (tokens.length) {
+                        const last = tokens[tokens.length - 1];
+                        if (last.kind !== 'text' || last.span.end <= end)
+                            break;
+                        if (last.valueStart < end) {
+                            tokens[tokens.length - 1] = { ...last, value: last.value.slice(0, end - last.valueStart), span: span(source, last.valueStart, end) };
+                            break;
+                        }
+                        tokens.pop();
+                    }
                     if (text[after] === '\r')
                         after += 2;
                     else if (text[after] === '\n')
                         after++;
                     cursor = after;
                     textStart = after;
+                    lineIsWhitespace = true;
+                    lineStart = after;
                     continue;
                 }
             }
@@ -70,6 +112,7 @@ export const lex = (source) => {
             tokens.push({ kind: 'js', value: text.slice(cursor + 5, close), valueStart: cursor + 5, span: span(source, cursor, end) });
             cursor = end;
             textStart = end;
+            lineIsWhitespace = false;
             continue;
         }
         let kind = null;
@@ -116,6 +159,7 @@ export const lex = (source) => {
         tokens.push({ kind, value: text.slice(valueStart, valueEnd), valueStart, span: span(source, cursor, close + 1) });
         cursor = close + 1;
         textStart = cursor;
+        lineIsWhitespace = false;
     }
     pushText(text.length);
     return tokens;

@@ -2,14 +2,8 @@
 // All filters are pure functions, RE2-compatible where regex is used.
 // Passed as second argument to tpl.render(data, util).
 
+import { stringify } from './compiler/stringify.js'
 import type { FilterMap } from './compiler/types.js'
-
-const HTML_MAP: Record<string, string> = {
-	'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;',
-}
-
-const htmlEscape = (s: string): string =>
-	!s || typeof s !== 'string' ? s : s.replace(/[&<>'"]/g, c => HTML_MAP[c] ?? c)
 
 // ── Strings ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +91,7 @@ const dateMonthShort = (s: string, locale: string): string => {
 // ── Arrays ───────────────────────────────────────────────────────────────────
 
 const join = (arr: unknown[], sep = ', '): string =>
-	Array.isArray(arr) ? arr.join(sep) : String(arr)
+	Array.isArray(arr) ? arr.map(value => stringify(value ?? '')).join(sep) : stringify(arr)
 
 const first = (arr: unknown[]): unknown =>
 	Array.isArray(arr) ? arr[0] : undefined
@@ -117,7 +111,7 @@ const round = (n: number, decimals = 0): number => {
 }
 
 const number = (n: number, locale = 'de-DE'): string =>
-	typeof n === 'number' ? n.toLocaleString(locale) : String(n)
+	typeof n === 'number' ? n.toLocaleString(locale) : stringify(n)
 
 // ── stripWhitespace (for strip: true option) ─────────────────────────────────
 

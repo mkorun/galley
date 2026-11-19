@@ -12,14 +12,19 @@ repository.
 ## Pipeline
 
 ```text
-source → cursor lexer → typed AST → analysis/lint → JavaScript codegen
+source → cursor lexer → typed AST → partial expansion → lint/loop analysis → static strip → HTML context records → JavaScript codegen
 ```
 
+- `lexer.ts` removes config tags, escaped-brace backslashes and standalone comment lines everywhere.
+- `parser.ts` applies ADR-014/015 and joins adjacent literal texts.
 - `lexer.ts` has no regex-engine dependency.
 - `path.ts` and `expression.ts` produce structured expressions; raw template
   fragments never reach code generation.
 - Every token, expression, node, and diagnostic carries a source span.
 - `lint()` operates on the AST without invoking `new Function()`.
+- `context.ts` is the only HTML reader. It records placement, URL sinks and metadata boundaries; codegen does no HTML recognition. Snippets are specialized by structural context and write-checking contract, with recursive preservation verified before generation.
+- Partial boundaries survive until context checking, while declarations retain their original lexical scope.
+- `url.ts` performs targeted incremental prefix admission without reference decoding at nonempty writes. It is not an HTML tokenizer.
 - `codegen.ts` emits loop metadata only when the AST proves it is used.
 - All generated identifiers use an internal `$$` namespace unavailable to
   template declarations, preventing host/filter variables from being shadowed.

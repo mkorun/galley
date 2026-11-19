@@ -1,10 +1,7 @@
 // Chase-New util — core filter functions
 // All filters are pure functions, RE2-compatible where regex is used.
 // Passed as second argument to tpl.render(data, util).
-const HTML_MAP = {
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;',
-};
-const htmlEscape = (s) => !s || typeof s !== 'string' ? s : s.replace(/[&<>'"]/g, c => HTML_MAP[c] ?? c);
+import { stringify } from './compiler/stringify.js';
 // ── Strings ──────────────────────────────────────────────────────────────────
 const upper = (s) => typeof s === 'string' ? s.toUpperCase() : s;
 const lower = (s) => typeof s === 'string' ? s.toLowerCase() : s;
@@ -75,7 +72,7 @@ const dateMonthShort = (s, locale) => {
     return d.toLocaleDateString(locale || 'de', { month: 'short' }).replace(/\.$/, '');
 };
 // ── Arrays ───────────────────────────────────────────────────────────────────
-const join = (arr, sep = ', ') => Array.isArray(arr) ? arr.join(sep) : String(arr);
+const join = (arr, sep = ', ') => Array.isArray(arr) ? arr.map(value => stringify(value ?? '')).join(sep) : stringify(arr);
 const first = (arr) => Array.isArray(arr) ? arr[0] : undefined;
 const last = (arr) => Array.isArray(arr) ? arr[arr.length - 1] : undefined;
 const length = (val) => Array.isArray(val) || typeof val === 'string' ? val.length : 0;
@@ -86,7 +83,7 @@ const round = (n, decimals = 0) => {
     const factor = Math.pow(10, decimals);
     return Math.round(n * factor) / factor;
 };
-const number = (n, locale = 'de-DE') => typeof n === 'number' ? n.toLocaleString(locale) : String(n);
+const number = (n, locale = 'de-DE') => typeof n === 'number' ? n.toLocaleString(locale) : stringify(n);
 // ── stripWhitespace (for strip: true option) ─────────────────────────────────
 export const stripWhitespace = (val) => !val || typeof val !== 'string'
     ? val

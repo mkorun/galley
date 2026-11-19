@@ -1,27 +1,7 @@
-import type { Expression, PathExpression, TemplateAst, TemplateNode } from './ast.js'
+import type { Expression, HtmlSlot, PathExpression, TemplateAst, TemplateNode, TextNode, ValueRecord } from './ast.js'
 import { fail } from './diagnostics.js'
-import type { SourceSpan } from './types.js'
 
 export interface GeneratedProgram { readonly body: string; readonly async: boolean }
-
-/**
- * The check of what a render writes into a URL attribute, as the generated render function runs it. Next to each
- * buffer, the function keeps what it wrote since the last `<` (the buffer's name and `t`), so the open tag a value is
- * written into is known without reading the buffer. When a value goes into `href`, `src`, `action`, `formaction`,
- * `poster`, `cite` or `xlink:href`, the attribute's value with it, read as a browser reads a URL (leading controls and
- * spaces dropped, tabs and newlines removed), must be relative or have the scheme http, https, mailto or tel, and
- * name no other host without a scheme (`//host`, `\\host`); anything else stops the render with error G5001. What
- * came before the value in the attribute counts, however it got there: text, other values, values written in an
- * {#if} or by a snippet.
- */
-const URL_CHECK = String.raw`const $$urlTag=/^<[a-z][^\s\/>]*(?:\s+[^\s"'>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\x60]+))?)*\s+(href|src|action|formaction|poster|cite|xlink:href)\s*=\s*(?:"([^"]*)|'([^']*)|([^\s"'=<>\x60]*))$/i;const $$url=(t,v)=>{if(v==null||v===''||t[0]!=='<'||t.indexOf('=')<0)return v;const m=$$urlTag.exec(t);if(!m)return v;const s=(m[2]??m[3]??m[4]??'')+String(v),u=s.replace(/^[\u0000- ]+/,'').replace(/[\t\n\r]/g,'');if(/^[a-z][a-z0-9+.-]*:/i.test(u)?!/^(?:https?|mailto|tel):/i.test(u):/^[\\/][\\/]/.test(u))throw new Error('G5001: '+m[1].toLowerCase()+'='+JSON.stringify(s)+' is no URL a template may write there: a relative one, or one of http:, https:, mailto:, tel:');return v};const $$tail=(t,w)=>{w=String(w);const k=w.lastIndexOf('<');return k<0?t+w:w.slice(k)};const $$str=v=>{try{return String(v)}catch{return Object.prototype.toString.call(v)}};const $$raw=v=>v==null?v:$$str(v).replace(/[\uE000-\uE003]/g,c=>$$html[c]);`
-
-/** The globals the generated code calls. A template that names one for all of its render would change what it does. */
-const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array'])
-
-const notGenerated = (name: string, at: SourceSpan): void => {
-	if (GENERATED_GLOBALS.has(name)) fail('G3007', `The name ${name} is needed by the generated code`, at)
-}
 
 const escapeJs = (value: string): string => /[\\'\n\r\u2028\u2029]/.test(value)
 	? value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
@@ -40,8 +20,8 @@ const isIdentifier = (value: string): boolean => {
 
 const safeProperty = (value: string): string => isIdentifier(value) ? `?.${value}` : `?.[${JSON.stringify(value)}]`
 
-const pathCode = (path: PathExpression, scope: readonly string[]): string => {
-	let code = scope.includes(path.root) ? path.root : `$${safeProperty(path.root)}`
+const pathCode = (path: PathExpression, scope: ReadonlySet<string>): string => {
+	let code = scope.has(path.root) ? path.root : `$${safeProperty(path.root)}`
 	for (const segment of path.segments) {
 		if (segment.kind === 'property') code += safeProperty(segment.value as string)
 		else if (typeof segment.value === 'number') code += `?.[${segment.value}]`
@@ -51,56 +31,125 @@ const pathCode = (path: PathExpression, scope: readonly string[]): string => {
 	return code
 }
 
-const expressionCode = (expression: Expression, scope: readonly string[]): string => {
+const expressionCode = (expression: Expression, scope: ReadonlySet<string>): string => {
 	switch (expression.kind) {
 		case 'path': return pathCode(expression, scope)
 		case 'literal': return expression.raw
 		case 'unary': return `!(${expressionCode(expression.operand, scope)})`
 		case 'binary': return `(${expressionCode(expression.left, scope)}${expression.operator}${expressionCode(expression.right, scope)})`
 		case 'pipe': return expression.pipes.reduce((input, pipe) =>
-			`$$filters.${pipe.name}(${input}${pipe.args.map(arg => `,${expressionCode(arg, scope)}`).join('')})`, expressionCode(expression.input, scope))
+			`$$filter('${pipe.name}',$$filters.${pipe.name},${input}${pipe.args.map(arg => `,${expressionCode(arg, scope)}`).join('')})`, expressionCode(expression.input, scope))
 	}
 }
 
 export const generate = (ast: TemplateAst, options: { readonly allowCode?: boolean; readonly strip?: boolean; readonly stripEmptyMeta?: boolean; readonly debug?: boolean } = {}): GeneratedProgram => {
-	let body = "'use strict';$??={};let $$='',$$t='';"
+	const strip = options.stripEmptyMeta !== false
+	const hasMetadata = (nodes: readonly TemplateNode[]): boolean => nodes.some(node => {
+		if (node.kind === 'text') return node.records?.some(record => record.kind === 'tag-open' && record.dynamic) === true
+		if (node.kind === 'if') return node.branches.some(branch => hasMetadata(branch.children))
+		if (node.kind === 'each') return hasMetadata(node.children)
+		if (node.kind === 'snippet') return node.variants?.some(variant => hasMetadata(variant.children)) === true
+		return false
+	})
+	const trackIndent = strip && hasMetadata(ast.children)
+	// $$url: the prefix of the URL value being written. $$tag: the <meta> or <link> start tag being written; $$meta: its target value.
+	let body = "'use strict';$??={};let $$='',$$url=null,$$meta=null,$$tag=null,$$indent=0,$$skipNewline=false;"
+	body += `const $$str=v=>v==null?'':$$stringify(v,${options.debug === true}),$$filter=(n,f,...a)=>{if(typeof f!=='function')throw new TypeError('Unknown filter '+n);return $$filterWithWarnings(${options.debug === true},f,...a);};`
 	if (options.debug) body += '// [galley] AST compiler debug output\n'
-	const markerOpen = '\uE000galley-meta\uE001', markerClose = '\uE002galley-meta\uE003'
-	let hasContentAttribute = false, hasHrefAttribute = false
 	let sequence = 0
-	let isAsync = false
 
-	const emitNodes = (nodes: readonly TemplateNode[], scope: string[], buffer: string): void => {
-		for (const node of nodes) {
-			switch (node.kind) {
-				case 'text': {
-					body += `${buffer}+='${escapeJs(node.value)}';`
-					// what was written since the last <, for URL_CHECK
-					const open = node.value.lastIndexOf('<')
-					if (open >= 0) body += `${buffer}t='${escapeJs(node.value.slice(open))}';`
-					else if (node.value) body += `${buffer}t+='${escapeJs(node.value)}';`
+	/** The record of a value when something at render depends on it. */
+	const live = (record: ValueRecord | undefined): ValueRecord | null => record?.dynamic && (record.url !== null || (record.tag !== null && strip)) ? record : null
+	/** What a write into a checked value owes: the URL check and the mark for stripEmptyMeta. A snippet has fed the prefix itself. */
+	const written = (slot: HtmlSlot | undefined, value: string, feed: boolean, escaped = false, nonempty = `${value}.length>0`): string =>
+		(slot?.url ? `${feed ? `$$url.feed(${value},${escaped});` : ''}$$url.check(${nonempty});` : '')
+		+ (slot?.metadata && strip ? `if($$meta){$$meta.dynamic=true;$$meta.nonempty||=${value}.length>0;}` : '')
+
+	/** Static text is one literal, cut only where a record has something to do at render. */
+	const emitText = (node: TextNode, buffer: string): void => {
+		const value = node.value
+		let from = 0
+		let open = live(node.open)
+		const literal = (to: number): void => {
+			if (to > from) {
+				const text = escapeJs(value.slice(from, to))
+				const newline = value.startsWith('\r\n', from) ? 2 : value.startsWith('\n', from) ? 1 : 0
+				if (trackIndent && newline) body += `if($$skipNewline){${buffer}+='${escapeJs(value.slice(from + newline, to))}';}else{${buffer}+='${text}';}`
+				else body += `${buffer}+='${text}';`
+				if (trackIndent) body += '$$skipNewline=false;'
+				if (trackIndent) {
+					const literal = value.slice(from, to)
+					let trailing = 0
+					while (literal.charCodeAt(literal.length - trailing - 1) === 32 || literal.charCodeAt(literal.length - trailing - 1) === 9) trailing++
+					body += trailing === literal.length ? `$$indent+=${trailing};` : `$$indent=${trailing};`
+				}
+				if (open?.url) body += `$$url.feed('${text}');`
+				if (open?.tag && strip) body += 'if($$meta)$$meta.nonempty=true;'
+			}
+			from = to
+		}
+		for (const record of node.records ?? []) {
+			switch (record.kind) {
+				case 'tag-open': {
+					if (!record.dynamic || !strip) break
+					literal(record.at)
+					body += `$$tag={start:${buffer}.length-$$indent,target:null,current:null};`
 					break
 				}
+				case 'target':
+					if (!record.tag.dynamic || !strip) break
+					// The first target attribute of the tag is the one a browser keeps.
+					body += '$$tag.current=$$tag.target?null:($$tag.target={dynamic:false,nonempty:false});'
+					break
+				case 'value-open':
+					if (!live(record)) break
+					literal(record.at)
+					open = record
+					if (record.url) body += `$$url=new $$UrlPrefix('${record.url}');`
+					if (record.tag && strip) body += '$$meta=$$tag.current;'
+					break
+				case 'value-close':
+					if (!open) break
+					literal(record.at)
+					if (open.url) body += '$$url.check($$url.checkpoints > 0);'
+					open = null
+					break
+				case 'tag-close': {
+					if (!record.tag.dynamic || !strip) break
+					literal(record.at)
+					// A tag that goes takes the line break after it along.
+					const newline = value.startsWith('\r\n', from) ? '\r\n' : value.startsWith('\n', from) ? '\n' : ''
+					body += `if($$tag.target?.dynamic&&!$$tag.target.nonempty){${buffer}=${buffer}.slice(0,$$tag.start);$$skipNewline=${newline.length === 0};}else{${buffer}+='${escapeJs(newline)}';$$skipNewline=false;}$$tag=null;`
+					from += newline.length
+					break
+				}
+			}
+		}
+		literal(value.length)
+	}
+
+	const emitNodes = (nodes: readonly TemplateNode[], scope: Set<string>, buffer: string, bindings: readonly string[] = []): void => {
+		const localNames: string[] = []
+		const declare = (name: string): void => {
+			if (!scope.has(name)) { scope.add(name); localNames.push(name) }
+		}
+		for (const name of bindings) declare(name)
+		for (const node of nodes) {
+			switch (node.kind) {
+				case 'text': emitText(node, buffer); break
 				case 'output': {
 					const value = `$$v${++sequence}`
 					const expr = expressionCode(node.expression, scope)
-					if (node.emptyAttribute === 'content') hasContentAttribute = true
-					if (node.emptyAttribute === 'href') hasHrefAttribute = true
-					if (node.emptyAttribute) body += `${buffer}+='${markerOpen}';`
-					// checked before it is written, with what its open tag holds (URL_CHECK); an escaped value holds no <. The
-					// marks of stripEmptyMeta, which leave the text after this check, are written as references: no value makes one
-					if (node.raw) body += `{const ${value}=$$url(${buffer}t,$$raw(${expr}))??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`
-					else body += `{const ${value}=${expr};if(${value}!=null){const e=$$url(${buffer}t,$$str(${value}).replace(/[&<>'"\\uE000-\\uE003]/g,c=>$$html[c]));${buffer}+=e;${buffer}t+=e;}}`
-					if (node.emptyAttribute) body += `${buffer}+='${markerClose}';`
+					body += `{const ${value}=$$str(${expr})${node.raw ? '' : ".replace(/[&<>'\"]/g,c=>$$html[c])"};`
+					body += `${written(node.slot, value, true, !node.raw)}${buffer}+=${value};${trackIndent ? '$$indent=0;$$skipNewline=false;' : ''}}`
 					break
 				}
 				case 'const':
-					notGenerated(node.name, node.span)
-					body += `const ${node.name}=(${expressionCode(node.expression, scope)}??'');`; scope.push(node.name); break
+					body += `const ${node.name}=(${expressionCode(node.expression, scope)}??'');`; declare(node.name); break
 				case 'if': {
 					node.branches.forEach((branch, index) => {
 						body += index === 0 ? `if(${expressionCode(branch.condition!, scope)}){` : branch.condition ? `else if(${expressionCode(branch.condition, scope)}){` : 'else{'
-						emitNodes(branch.children, scope.slice(), buffer)
+						emitNodes(branch.children, scope, buffer)
 						body += '}'
 					})
 					break
@@ -112,51 +161,51 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					const needsCounter = metadata.has('isFirst') || metadata.has('isLast')
 					body += `{const ${collection}=${pathCode(node.collection, scope)};if(${collection}){const ${array}=Array.isArray(${collection});`
 					if (needsCount) body += `const ${count}=${array}?${collection}.length:Object.keys(${collection}).length;`
-					const childScope = scope.slice(); childScope.push(node.item); if (node.index) childScope.push(node.index); for (const name of metadata) childScope.push(name)
+					const bindings = [node.item, ...metadata]; if (node.index) bindings.push(node.index)
 					if (needsCounter) body += `let $$n${id}=0;`
 					if (node.index) body += `for(const [${node.index},${node.item}] of ${array}?${collection}.entries():Object.entries(${collection})){`
 					else body += `for(const ${node.item} of (${array}?${collection}:Object.values(${collection}))){`
 					if (metadata.has('length')) body += `const length=${count};`
 					if (metadata.has('isFirst')) body += `const isFirst=$$n${id}===0;`
 					if (metadata.has('isLast')) body += `const isLast=$$n${id}===${count}-1;`
-					emitNodes(node.children, childScope, buffer)
+					emitNodes(node.children, scope, buffer, bindings)
 					body += `${needsCounter ? `$$n${id}++;` : ''}}}}`
 					break
 				}
 				case 'snippet': {
-					notGenerated(node.name, node.span)
-					const snippetBuffer = `$$s${++sequence}`
-					body += `function ${node.name}(${node.param ?? ''}){let ${snippetBuffer}='',${snippetBuffer}t='';`
-					const childScope = scope.slice(); if (node.param) childScope.push(node.param)
-					emitNodes(node.children, childScope, snippetBuffer)
-					body += `return ${snippetBuffer};}`
+					for (const variant of node.variants ?? []) {
+						const snippetBuffer = `$$s${++sequence}`
+						body += `function ${variant.name}(${node.param ?? '$$unused'},$$url,$$meta){let ${snippetBuffer}='',$$tag=null,$$indent=0,$$skipNewline=false;`
+						emitNodes(variant.children, scope, snippetBuffer, node.param ? [node.param] : [])
+						body += `return ${snippetBuffer};}`
+					}
+					// {@js} calls the snippet as ordinary content. It hands over no value that is being written.
+					if (node.js) body += `function ${node.name}(v){return ${node.js}(v);}`
 					break
 				}
 				case 'render': {
 					const value = `$$v${++sequence}`
-					const call = `${node.name}(${node.argument ? expressionCode(node.argument, scope) : ''})`
-					body += `{const ${value}=$$url(${buffer}t,${call})??'';${buffer}+=${value};${buffer}t=$$tail(${buffer}t,${value});}`
+					// Check the complete result only if this call checked a nonempty dynamic write. Static-only results owe no checkpoint.
+					const checkpoint = `$$check${sequence}`
+					if (node.slot?.url) body += `{const ${checkpoint}=$$url.checkpoints;`
+					else body += '{'
+					body += `const ${value}=${node.specialization ?? node.name}(${node.argument ? expressionCode(node.argument, scope) : 'undefined'},$$url,$$meta);`
+					body += `${written(node.slot, value, false, false, `$$url.checkpoints!==${checkpoint}`)}${buffer}+=${value};${trackIndent ? '$$indent=0;$$skipNewline=false;' : ''}}`
 					break
 				}
 				case 'js':
-					if (!options.allowCode) fail('G4001', '{@js} cannot be generated while allowCode is false', node.span, 'Enable allowCode only for trusted templates.')
-					isAsync ||= node.awaits
-					body += `{const $$j=(${node.awaits ? `await (async()=>{${node.code}})()` : `(()=>{${node.code}})()`}??'');${buffer}+=$$j;${buffer}t=$$tail(${buffer}t,String($$j));}`
+					body += `{const $$j=$$str(${node.awaits ? `await (async()=>{${node.code}})()` : `(()=>{${node.code}})()`});`
+					body += `${written(node.slot, '$$j', true)}${buffer}+=$$j;${trackIndent ? '$$indent=0;$$skipNewline=false;' : ''}}`
 					break
 				case 'partial': fail('G4002', `Partial ${JSON.stringify(node.path)} was not expanded before code generation`, node.span)
 			}
 		}
+		for (const name of localNames) scope.delete(name)
 	}
 
 	// '$' is seeded as an always-in-scope root so a path rooted at exactly "$"
 	// addresses the data parameter itself, not a property literally named "$".
-	emitNodes(ast.children, ['$'], '$$')
-	// after the directive, which must stay the first statement
-	body = body.replace("'use strict';", () => `'use strict';${URL_CHECK}`)
-	if (options.strip) body += '$$=$$filters.stripWhitespace($$);'
-	if (options.stripEmptyMeta !== false && hasContentAttribute) body += `$$=$$.replace(/[ \\t]*<meta\\b[^<>]*\\bcontent=(?:"(?:${markerOpen}|${markerClose})+"|'(?:${markerOpen}|${markerClose})+')[^<>]*\\/?>(?:\\r?\\n)?/g,'');`
-	if (options.stripEmptyMeta !== false && hasHrefAttribute) body += `$$=$$.replace(/[ \\t]*<link\\b[^<>]*\\bhref=(?:"(?:${markerOpen}|${markerClose})+"|'(?:${markerOpen}|${markerClose})+')[^<>]*\\/?>(?:\\r?\\n)?/g,'');`
-	if (hasContentAttribute || hasHrefAttribute) body += `$$=$$.split('${markerOpen}').join('').split('${markerClose}').join('');`
+	emitNodes(ast.children, new Set(['$']), '$$')
 	body += 'return $$;'
-	return { body, async: isAsync || options.allowCode === true }
+	return { body, async: options.allowCode === true }
 }

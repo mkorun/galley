@@ -71,8 +71,8 @@ describe('AST compiler baseline', () => {
 	})
 
 	test('compiler production patterns avoid unsupported RE2 constructs', async () => {
-		const files = ['lexer.ts', 'expression.ts', 'path.ts', 'parser.ts', 'analysis.ts', 'codegen.ts', 'diagnostics.ts', 'lint.ts']
-		for (const file of files) {
+		const directory = new URL('../compiler/', import.meta.url)
+		for await (const file of new Bun.Glob('*.ts').scan(directory.pathname)) {
 			const source = await Bun.file(new URL(`../compiler/${file}`, import.meta.url)).text()
 			expect(source).not.toMatch(/\(\?<?[=!]/)
 			expect(source).not.toMatch(/\\[1-9]/)
@@ -102,8 +102,8 @@ describe('AST compiler baseline', () => {
 		}
 	})
 
-	test('lint reports unknown filters and unused snippets without codegen', () => {
-		const diagnostics = lint('{#snippet unused(x)}{ x }{/snippet}{ title | slugfiy }', {
+	test('lint reports unknown filters and unused snippets without codegen', async () => {
+		const diagnostics = await lint('{#snippet unused(x)}{ x }{/snippet}{ title | slugfiy }', {
 			knownFilters: new Set(['slugify']),
 		})
 		expect(diagnostics.map(d => d.code)).toEqual(['G3001', 'G3006'])

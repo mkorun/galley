@@ -3,6 +3,66 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Security
+
+- Close HTML placement and URL-admission bypasses affecting 0.3.0–0.3.4, including `strip: true`. Accept a strict
+  writing grammar with one compile-time reader; check URL prefixes incrementally at nonempty dynamic writes.
+- Refuse dynamic SVG animation values (G3016), including attributes supplied by snippets or partials.
+  Versions 0.3.x render these values unchecked.
+- Check every URL attribute end after a nonempty dynamic write, including literal snippet output and character references.
+  `<a href="{ u }:alert(1)">` with `u = "javascript"` now stops with G5001; 0.3.x renders the inline form unchecked.
+- Preserve literal NUL prefixes and shared safe string conversion for escaped output and built-in filters.
+- Capture actual metadata tags without output markers and preserve lint warnings alongside context errors.
+
+### Breaking
+
+- Finished URL prefixes receive an end check when the value had a nonempty dynamic write. An unsettled bare word
+  includes file names such as `page.html` and host names such as `example.org`. Any following character reference
+  stops with G5001, including `&amp;`, `&#x2F;` and `&shy;`. For a relative file URL, use `href="./{ file }&amp;b=1"`.
+  A host followed by a literal port also stops: migrate `href="{ host }:8080/"` to `href="https://{ host }:8080/"`.
+  Static fallbacks without a nonempty dynamic write remain unchecked.
+- Refuse template tags in `to`, `from`, `by` and `values` on `set`, `animate`, `animateMotion` and
+  `animateTransform`, in every namespace and regardless of `attributeName` (G3016). Static values remain valid.
+- `lint()` always returns `Promise<Diagnostic[]>`. Migrate `lint(source, options)` to `await lint(source, options)`.
+  With `includes`, partials resolve before checking; without a resolver, each partial preserves its entry context
+  and the surrounding template is still checked. Both paths honor `strip`.
+- Refuse XML prologs, CDATA and dynamic tag names.
+- URL-like markup inside text elements, including scripting-enabled `noscript`, is text and receives no URL
+  attribute check. Only actual quoted URL attributes receive admission; scripting-disabled parsing is outside the guarantee.
+- Refuse malformed HTML separators, incomplete or split delimiters, end-tag attributes, dynamic unquoted values,
+  attribute-writing snippets, nonpreserving blocks/calls, unsafe foreign integration content, `select`, `frameset`,
+  `plaintext`, and `col` inside `template` (G3008–G3014).
+- Refuse references in unsettled URL starts before the first template tag, and starts that are already forbidden
+  (G3015, only in values with a dynamic write, including an empty write). Subsequent static references and raw/JS ampersands make an unsettled prefix undecided and stop the next nonempty write or the attribute-end check with G5001.
+- Apply `strip` to static text before HTML checking; whitespace inside dynamic values is preserved. Bytes around
+  values can differ from output-wide stripping. Keep the exported `util.stripWhitespace` helper.
+- Remove standalone comment lines in the lexer everywhere; refuse template tags inside inline comments.
+  A comment beside `<galley:config>` now becomes standalone after config removal, in either order; 0.3.4 kept it.
+- Keep the line break after a block tag that follows another template tag on its line (G-22). With `a = 1` and
+  `p = true`, `{ a }{#if p}\nA\n{/if}` now renders `1\nA\n` instead of `1A\n`.
+  Likewise, `<ul>\n{#each xs as v}{#if v}\n  <li>{ v }</li>\n{/if}{/each}\n</ul>` with `xs = [1]` renders
+  `<ul>\n\n  <li>1</li>\n\n</ul>` instead of `<ul>\n  <li>1</li>\n</ul>`.
+- `stripEmptyMeta` preserves whitespace supplied by dynamic values. It still removes static indentation and one
+  following static line break across blocks when the metadata tag goes, as in 0.3.4.
+- A snippet visible to `{@js}` must also compile as ordinary text, even when its `{@render}` calls are all in
+  quoted attributes. Invalid ordinary-text HTML in that snippet is now refused.
+- Static-only snippet results no longer create a URL write checkpoint just because their result is nonempty.
+  Versions 0.3.x checked completed snippet results, including static-only values. Finished prefixes
+  receive the conditional attribute-end check described above.
+- Reserve `String`, `Object`, `Array` and `TypeError` for generated runtime calls (G3007).
+
+### Fixed
+
+- Report rule 5 and rule 9 HTML refusals at the opening tag and include tag/quote identities in context mismatches.
+- Bound compiler work for joined and stripped text: append source spans in place and map positions only on refusal.
+
+### Removed
+
+- The URL character-reference decoder and its entity tables.
+- Browser-repair states, continuation searches, comment records and the post-reader comment-removal pass.
+
 ## [0.3.4] — 2026-10-31
 
 ### Security

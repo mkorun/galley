@@ -1,6 +1,6 @@
 # galley — Template Engine
 
-Svelte-inspired template engine that compiles templates once into native JS functions. Rendering is pure function execution — no parser, no overhead.
+Svelte-inspired template engine that compiles templates once into native JS functions. Rendering executes those functions with targeted URL-prefix validation, without an HTML parser.
 
 **Compile-time templating. Typed AST, source-spanned diagnostics. Strict-mode codegen. No runtime parser.**
 
@@ -95,7 +95,7 @@ parser for editor and build-tool integrations:
 ```typescript
 import { lint } from '@mkorun/galley'
 
-const diagnostics = lint(source, {
+const diagnostics = await lint(source, {
   sourceId: 'article.chase',
   knownFilters: new Set(['slugify', 'dateFormat']),
 })
@@ -147,9 +147,35 @@ HTML-escapes the value. Safe for user input and metadata in element text and in 
 <meta name="description" content="{ meta.description }">
 ```
 
-Every value is turned into a string first (`String(value)`; `null` and `undefined` give an empty string), then its special characters are escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `'` → `&apos;`, `"` → `&quot;`. Arrays and objects are escaped too.
+Every value is turned into a string first (`String(value)`; `null` and `undefined` give an empty string; a failed conversion gives `[object Object]`, with a warning in debug mode), then its special characters are escaped: `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `'` → `&apos;`, `"` → `&quot;`. Arrays and objects are escaped too.
 
-**In a URL attribute:** what a render writes into the value of `href`, `src`, `action`, `formaction`, `poster`, `cite` or `xlink:href` must leave a relative URL or one that starts with `http:`, `https:`, `mailto:` or `tel:`, read as a browser reads it (leading spaces and controls, tabs and newlines do not count); a URL of another host without a scheme (`//host`, `\\host`) is refused as well. Each value is checked with what the attribute holds before it, however it got there — text, other values, values written in an `{#if}` or by a snippet — so `href="{#if a}{ a.url }{/if}"` and `href=" { url }"` are checked like `href="{ url }"`, and `href="/tags/{ tag }/"` is not stopped by the tag. Anything else stops the render with error `G5001`, so data cannot put `javascript:` into a link. `{@raw}` is checked the same way.
+**In a quoted URL attribute:** each nonempty dynamic write to `href`, `src`, `action`, `formaction`, `poster`,
+`cite` or `xlink:href` is checked with all preceding serialized characters in that attribute. This includes literals,
+executed branches, loops and snippet writes. A snippet's complete result creates an additional checkpoint only
+when it checked a nonempty dynamic write, including its literal suffix without scanning its output twice. Static-only
+results, empty strings, nullish values, empty arrays and empty snippet results create no write checkpoint.
+At the end of every checked URL attribute, the finished prefix is checked once more if any nonempty dynamic
+write was checked in that value. This includes all executed literal and snippet output. `{ u }:alert(1)` and
+`{ u }&#58;alert(1)` stop with G5001 for `u = "javascript"`. With no nonempty dynamic write, literal fallbacks
+remain unchecked. An unsettled bare word includes file names such as `page.html` and host names such as
+`example.org`. Any following character reference stops, including `&amp;`, `&#x2F;` and `&shy;`.
+For a relative file URL, write `href="./{ file }&amp;b=1"`. A literal port after a host also stops: migrate
+`href="{ host }:8080/"` to `href="https://{ host }:8080/"`. A settled `u = "https://example.org"` remains allowed.
+
+The prefix must be relative or use `http:`, `https:`, `mailto:` or `tel:`. Every leading slash/backslash pair is
+refused, including mixed and same-host spellings. Literal NUL is read as U+FFFD; leading ASCII controls and spaces
+are ignored, then TAB, LF and CR are ignored throughout. NBSP, BOM and percent escapes are left alone.
+
+Character references are never decoded by the URL check. Before the prefix is settled as relative or an allowed
+scheme, a static `&` before the first template tag is a compile error (`G3015`) when the value has a dynamic write. Write the character itself there.
+A static start that is already forbidden, such as `//host/` or `data:`, is G3015 when the value has a dynamic write; use a relative URL or an allowed scheme. Static-only blocks, constants, partials and snippets keep their literal URLs.
+An `&` in escaped output is safe: it begins one of the five HTML escapes and ends any scheme candidate. An `&` in
+later static text or raw/JS output makes an unsettled prefix permanently undecided; the next nonempty write, or the
+raw/JS write itself, stops rendering with `G5001`. The message names the attribute and quotes the serialized prefix,
+including that `&`. Once settled, references are allowed, for example `/x?a=1&amp;b={ value }`.
+
+Processing is incremental and linear in output size. `{@raw}` and `{@js}` receive this source-slot check and remain
+outside the safety boundary; their authors must preserve the insertion context.
 
 **With fallback:**
 
@@ -170,7 +196,9 @@ Outputs the value **without** escaping. Use only for trusted HTML.
 {@raw meta.html ?? ''}
 ```
 
-Typical use case: rendered Markdown HTML.
+Typical use case: rendered Markdown HTML. Raw output must leave the HTML insertion context it found: in text,
+finish any markup you open; in a quoted value, preserve its matching quote. This is the template author's obligation.
+The compiler does not read raw output to discover a new context. The same obligation applies to `{@js}` results.
 
 ---
 
@@ -492,7 +520,7 @@ interface GalleyOptions {
     basedir?: string    // base directory for partials (default: '.')
   }
   allowCode?: boolean       // enable {@js} blocks (default: false)
-  strip?: boolean           // compress whitespace via util.stripWhitespace (default: false)
+  strip?: boolean           // strip static whitespace before HTML checking (default: false)
   debug?: boolean           // expose generated function in tpl.source (default: false)
   stripEmptyMeta?: boolean  // remove <meta content=""> and <link href=""> (default: true)
   knownFilters?: ReadonlySet<string> // report unknown pipes during compilation
@@ -513,26 +541,13 @@ const tpl = await galley(templateSource, options)
 const html = await tpl.render({ meta, markup, isDraft, tags }, util)
 ```
 
-The generated function looks roughly like this:
+The compiler resolves partials, analyzes the AST and applies lint checks. It then applies `strip`, if enabled, to
+static text. One HTML reader checks that exact text and records insertion places, URL values and metadata boundaries.
+Code generation emits static text unchanged and uses those records; rendering does no second HTML scan.
 
-```javascript
-function($, $$filters) {
-  'use strict';
-  $ ??= {};
-  let $$ = '';
-  $$+='<!DOCTYPE html>\n<html lang="';
-  {const $$v1=$?.meta?.lang;$$+=$$v1==null?'':typeof $$v1==='string'?$$v1.replace(/[&<>'"]/g,c=>$$html[c]):$$v1;}
-  $$+='">\n<body><h1>';
-  {const $$v2=$?.title;$$+=$$v2==null?'':typeof $$v2==='string'?$$v2.replace(/[&<>'"]/g,c=>$$html[c]):$$v2;}
-  if($?.isDraft){$$+=' <em>Draft</em>';}
-  $$+='</h1>';
-  $$+=($?.markup??'');
-  $$+='</body></html>';
-  return $$;
-}
-```
-
-`$$html` (the escape table) is passed as a closure at compile time — no per-render overhead.
+Escaped output uses the five-character HTML escape table. Checked URL values share an incremental prefix across
+branches, loop iterations and snippet calls. Ordinary attributes and statically settled URL prefixes need no runtime
+context operations.
 
 ---
 
@@ -548,22 +563,72 @@ Representative median from five serial runs on Bun 1.3.14, Linux x64,
 | private legacy oracle | base | 7.67 µs | 0.27 µs |
 | private legacy oracle | loop | 11.73 µs | 0.35 µs |
 
-Both compile and render are in the same low-single-digit-to-double-digit
-microsecond range as the compact legacy oracle in these small shapes — close
-enough that run-to-run and machine-to-machine variance can move either
-implementation ahead. These are internal microbenchmarks, not
-application-wide performance claims. A reproducible cross-engine comparison
-with output verification is maintained under `private/bench/`.
-
+The figures above describe the earlier compiler baseline. The context-analysis rebuild adds compile work and
+improves warm rendering in the measured shapes; first-render costs depend on the template and its URL prefixes.
+Internal microbenchmarks are not application-wide performance claims. Re-run measurements for your workload.
 ---
 
 ## Known Limitations
 
-- **The URL attribute check (`G5001`) reads the open tag the output so far ends in.** It checks each value as it is written, with what the attribute holds before it; text the template writes after a value is its own and is not checked (`href="{ x }script:…"`). A list of URLs (`srcset`) and URLs in CSS are not checked; a Content Security Policy is what keeps script out of a page.
+Galley accepts the following writing grammar around template tags. A “text” here means the static text between two
+template tags, after lexical removals, parser whitespace handling and optional `strip`. It refuses markup requiring
+browser repair at these boundaries; it does not validate a complete document tree.
 
-- **`{ }` escapes for HTML, not for every context.** It is safe in element text and in attribute values in quotes. It does not make a value safe in `<script>`, `<style>`, an `on*`, `style` or `srcdoc` attribute, or an attribute value without quotes: a template that writes untrusted values there is not protected.
+| Rule | Accepted contract | Refusal |
+|---|---|---|
+| 1 | In ordinary text, `<` begins a start tag, end tag, comment or DOCTYPE. Write other literal `<` as `&lt;`. | G3014 |
+| 2 | A start tag begins with a letter; its literal name is in one text, without whitespace, `/`, `>`, `<`, quotes, `=`, backtick or NUL. | G3014 |
+| 3 | Attributes follow whitespace. Names contain no quotes, `<`, backtick or NUL; name and `=` stay in one text. | G3014 |
+| 4 | Dynamic values stand inside matching quotes. Unquoted values are static, nonempty, complete in one text, without quotes, `=`, `<`, `>` or backtick. | G3008 / G3014 |
+| 5 | `/` in a tag occurs only as `/>`; text elements cannot self-close. | G3014 / G3013 |
+| 6 | An end tag is `</name`, optional whitespace, then `>`, all in one text; no attributes or NUL in its name. | G3014 |
+| 7 | An inline comment ends at its first `-->` in one text, starts with neither `>` nor `->`, and contains no `--!>`. A DOCTYPE has whitespace after its name, no inner `<`, and ends at the first `>` in that text. | G3014; template tag inside: G3013 |
+| 8 | `script`, `style`, `title`, `textarea`, `xmp`, `iframe`, `noembed`, `noframes`, `noscript` hold text until their literal end tag. No text ends with a beginning of that end tag. `script` contains no `<!--`. | G3014 / G3013 |
+| 9 | `select`, `frameset` and `plaintext` are refused; `col` is refused while a `template` is counted open. `col` stays allowed elsewhere. | G3013 |
+| 10 | Escaped output, raw/JS output and snippets stand in text or a quoted value. Snippets write no attributes. | G3008 / G3009 |
+| 11 | Every branch, iteration, partial and snippet preserves state, tag, attribute, text owner, foreign/template counts, open tag and open quote. Between attributes, each following attribute needs whitespace on every path; a template tag cannot split `=` from its value. | G3010 for blocks; G3011 for calls; malformed separators: G3014 |
+| 12 | The template finishes in ordinary text. | G3012 |
+| 13 | Inside counted `svg`/`math`, text elements and integration points hold text only: no `<` except their own end tag, and no raw/JS output. Values in foreign `script`/`style` are refused. | G3013 |
+| 14 | In a value with a dynamic write, the unsettled URL start before the first template tag contains no `&` and is not already forbidden. | G3015 |
+| 15 | On `set`, `animate`, `animateMotion` and `animateTransform`, `to`, `from`, `by` and `values` contain no template tags of any kind. Names are ASCII case-insensitive, in every namespace, regardless of `attributeName`; this includes attributes supplied by snippets or partials. Static values stay valid. | G3016 |
 
-- **`stripEmptyMeta` is a text heuristic, not an HTML parser.** It recognizes `<meta ... content="...">` and `<link ... href="...">` immediately preceding a dynamic value and removes the tag only if every dynamic piece of that attribute resolved to nothing. It does not understand HTML structure beyond that shape — content that happens to look like one of these tags outside real markup (inside a `<pre>` block, for example) is not specially excluded.
+`G3016` means an animation value contains a template tag. Write `to`, `from`, `by` and `values` statically;
+changing `attributeName` does not enable dynamic values. Refusals locate the offending character, quote a short
+excerpt and name the rule; structural mismatches include foreign/template counts and the identities of the differing open tags and quotes.
+
+For rule 13, integration points are `foreignObject`, `desc`, `title`, `mi`, `mo`, `mn`, `ms`, `mtext` and
+`annotation-xml`. Escaped output is allowed there except in `script`/`style`. A self-closing integration point opens
+nothing, unless its name is also a text element, which rule 5 refuses. Open `svg`, `math` and `template` names are
+counted until their matching end tags, never below zero. Every `template` start counts, including `/>`, because HTML
+ignores its self-closing flag. Breakouts can leave the reader stricter than the browser.
+CDATA is refused everywhere with `G3014`. Scripting is assumed enabled: `noscript` stays raw text.
+
+Snippet specializations use the exact structural context and whether URL writes need checking; metadata tracking follows from the tag and attribute.
+Context-changing recursion is `G3011`. A snippet lexically visible to `{@js}` also has an explicit ordinary-text
+specialization callable by JavaScript; `allowCode: true` alone does not require one. `String`, `Object`, `Array`
+and `TypeError` are reserved for generated runtime calls (`G3007`). `lint()` keeps warnings beside context errors
+and accepts the same compile options. It always returns `Promise<Diagnostic[]>`: use `await lint(source, options)`.
+With `includes`, it resolves partials and applies the same context and `strip` checks as `galley()`. Without a resolver,
+it treats each partial as preserving its context and continues checking the surrounding template.
+
+- **HTML escaping does not secure nested languages.** Script/style contents, event handlers, `style`, `srcdoc`,
+  `srcset`, CSS URLs and other nested languages remain the author's responsibility. Raw/JS output must preserve
+  its insertion context. The seven named URL attributes receive prefix admission, without an origin policy or
+  completed-URL validation.
+- **Standalone comment lines go in the lexer, everywhere, as in 0.3.4.** Removal includes indentation and the following
+  line break, or the preceding LF/CRLF at source end. This also applies inside script, title and attribute values,
+  including template tags held by those lines. Removing a `<galley:config>` on the same line can make a comment
+  standalone, in either order. Inline comments remain; an inline comment holding a template tag
+  is refused by rule 7.
+- **`strip: true` changes static text before checking.** It removes LF and spaces/tabs before `<`, plus spaces/tabs
+  after a final `>` only when the last root node is static text. Templates ending in a block or partial keep that
+  trailing whitespace. It leaves dynamic values untouched. The `util.stripWhitespace` export remains available for callers.
+- **`stripEmptyMeta` uses compiled tag captures.** It removes a real `meta[content]` or `link[href]` only when its
+  first target attribute is empty and an executed dynamic emission participated, including an empty emission.
+  Static empty tags and inactive branches are retained. Removal includes preceding static spaces/tabs and one following static line break, including across block
+  boundaries; it never trims whitespace supplied by dynamic values. Complete tags start and finish in ordinary text, so removal preserves the reader's
+  context; apparent metadata inside quoted values, comments or text elements stays literal.
+
 - **Misspelled or unregistered pipe names compile without complaint unless you opt in.** Filters are resolved at render time (`tpl.render(data, filters)`), not compile time, so galley cannot know your filter set unless you tell it: pass `knownFilters` (to `galley()` or `lint()`) to get a `G3001` warning for typos like `slugfiy`. Without it, a typo surfaces as a runtime `TypeError` with no source location.
 - **Invalid output expressions fail differently depending on where they are.** Per ADR-015, a malformed plain `{ expr }` falls back to literal text — useful for avoiding false positives on CSS/JS-shaped content that happens to sit inside `{ }`, but it also means a typo in that position can silently do nothing instead of erroring. Structurally required expressions (`{#if}` conditions, `{#each}` collections, `{@render}` arguments) always raise a compile error instead, since there's no sensible literal fallback for them.
 - **The include resolver is responsible for real filesystem confinement of `{@partial}` paths.** galley rejects the syntactic red flags before ever calling the resolver — `..` segments, absolute roots, UNC and Windows drive-prefixed paths, NUL bytes — but it has no notion of your filesystem layout, so it cannot itself guarantee a resolved path stays inside any particular directory.
@@ -580,7 +645,7 @@ Templates are trusted code, not user input — this applies to the whole templat
 
 The compiler's own regular expressions — in the lexer, path/expression parsers, and analysis pass — use only constructs supported by RE2: character classes, anchors, and non-capturing groups, no lookaheads, lookbehinds, backreferences, or conditional constructs anywhere. The lexer itself is index-based, not regex-driven, so template delimiters and block sigils have no RE2 exposure by construction.
 
-This is a compiler-internal property, not a runtime one: the small number of regexes that appear in *generated* render functions (HTML escaping, the `stripEmptyMeta` cleanup pass) run as ordinary JavaScript inside `new Function()`, where RE2 compatibility doesn't apply. What matters for RE2 is the compiler's own source — relevant if galley is ever embedded in a host that specifically requires RE2 syntax, or ported to a language whose regex engine is RE2-based.
+This is a compiler-internal property, not a runtime one: the small number of regexes that appear in *generated* render functions (HTML escaping and whitespace trimming) run as ordinary JavaScript inside `new Function()`, where RE2 compatibility doesn't apply. What matters for RE2 is the compiler's own source — relevant if galley is ever embedded in a host that specifically requires RE2 syntax, or ported to a language whose regex engine is RE2-based.
 
 ---
 

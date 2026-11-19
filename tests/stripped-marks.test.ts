@@ -17,8 +17,8 @@ describe('a value with the marks of stripEmptyMeta', () => {
 	})
 
 	test('stays the same text for a browser', async () => {
-		expect(await render('<p>{ v }</p>', { v: 'a\uE000b' })).toBe('<p>a&#xE000;b</p>')
-		expect(await render('<p>{@raw v}</p>', { v: 'a\uE003b' })).toBe('<p>a&#xE003;b</p>')
+		expect(await render('<p>{ v }</p>', { v: 'a\uE000b' })).toBe('<p>a\uE000b</p>')
+		expect(await render('<p>{@raw v}</p>', { v: 'a\uE003b' })).toBe('<p>a\uE003b</p>')
 	})
 
 	test('leaves a meta element without a value to be removed, as before', async () => {
@@ -29,7 +29,7 @@ describe('a value with the marks of stripEmptyMeta', () => {
 
 describe('what a template may not do to the generated code', () => {
 	test('a snippet or a constant may not take a global the generated code calls', async () => {
-		for (const name of ['String', 'Object', 'Array']) {
+		for (const name of ['String', 'Object', 'Array', 'TypeError']) {
 			await expect(render(`{#snippet ${name}(x)}{/snippet}`)).rejects.toThrow(/needed by the generated code/)
 			await expect(render(`{@const ${name} = 1}`)).rejects.toThrow(/needed by the generated code/)
 		}

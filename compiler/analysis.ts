@@ -17,22 +17,21 @@ const collectExpressionMetadata = (expression: Expression, used: Set<LoopMetadat
 	}
 }
 
-export const analyze = (ast: TemplateAst, dynamicEmptyAttributes = true): TemplateAst => {
+/** Whether a node of that kind stands anywhere in the nodes, the bodies of blocks, snippets and loaded partials included. */
+export const contains = (nodes: readonly TemplateNode[], kind: 'partial' | 'js'): boolean => nodes.some(node =>
+	node.kind === kind
+	|| (node.kind === 'if' && node.branches.some(branch => contains(branch.children, kind)))
+	|| ((node.kind === 'each' || node.kind === 'snippet' || node.kind === 'partial') && contains(node.children ?? [], kind)),
+)
+
+export const analyze = (ast: TemplateAst): TemplateAst => {
 	const annotate = (nodes: readonly TemplateNode[], metadata?: Set<LoopMetadata>): readonly TemplateNode[] => {
-		let recentText = ''
 		let changed: TemplateNode[] | null = null
 		for (let index = 0; index < nodes.length; index++) {
 			const node = nodes[index]!
 			let annotated: TemplateNode = node
-			if (node.kind === 'text') recentText += node.value
 			if (node.kind === 'output') {
 				if (metadata) collectExpressionMetadata(node.expression, metadata)
-				if (dynamicEmptyAttributes) {
-					const openTag = recentText.slice(recentText.lastIndexOf('<'))
-					const tagInitial = openTag.charCodeAt(1) | 32
-					if (tagInitial === 109 && /^<meta\b[^>]*\bcontent=(?:"[^"]*|'[^']*)$/i.test(openTag)) annotated = { ...node, emptyAttribute: 'content' }
-					else if (tagInitial === 108 && /^<link\b[^>]*\bhref=(?:"[^"]*|'[^']*)$/i.test(openTag)) annotated = { ...node, emptyAttribute: 'href' }
-				}
 			}
 			else if (node.kind === 'const') {
 				if (metadata) collectExpressionMetadata(node.expression, metadata)
@@ -55,8 +54,8 @@ export const analyze = (ast: TemplateAst, dynamicEmptyAttributes = true): Templa
 				const ownMetadata = new Set<LoopMetadata>()
 				annotated = { ...node, children: annotate(node.children, ownMetadata), metadata: ownMetadata }
 			}
-			else if (node.kind === 'snippet') {
-				const children = annotate(node.children, metadata)
+			else if (node.kind === 'snippet' || (node.kind === 'partial' && node.children)) {
+				const children = annotate(node.children!, metadata)
 				if (children !== node.children) annotated = { ...node, children }
 			}
 			if (annotated !== node) {

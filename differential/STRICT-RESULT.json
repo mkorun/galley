@@ -1,0 +1,54 @@
+{
+  "mode": "full",
+  "browser": "Chromium 156.0.8078.79 built on Debian GNU/Linux 13 (trixie)",
+  "inputDigest": "e13d3394de5004c386d272a901a23be3e74e3f7c068e65331bc7e429bd32bd9f",
+  "random": [
+    {
+      "alphabet": "mixed",
+      "seed": 1592590337,
+      "count": 60000,
+      "generated": 60000,
+      "accepted": 15094,
+      "rendered": 27493,
+      "stopped": 14359,
+      "observed": 12250
+    },
+    {
+      "alphabet": "foreign",
+      "seed": 1592590338,
+      "count": 40000,
+      "generated": 40000,
+      "accepted": 19740,
+      "rendered": 17348,
+      "stopped": 22320,
+      "observed": 5315
+    },
+    {
+      "alphabet": "tags",
+      "seed": 1592590339,
+      "count": 60000,
+      "generated": 60000,
+      "accepted": 19369,
+      "rendered": 145092,
+      "stopped": 12000,
+      "observed": 59078
+    }
+  ],
+  "foreign": {
+    "alphabet": 25,
+    "depth": 4,
+    "cases": 406900,
+    "browserForeignAmongAccepted": 0,
+    "refused": 156092,
+    "noForeignEntry": 245666,
+    "observed": 5142
+  },
+  "text": {
+    "names": 131,
+    "owners": 9,
+    "pairs": 154449,
+    "refused": 29025,
+    "observed": 125424
+  },
+  "failures": []
+}

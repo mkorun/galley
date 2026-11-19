@@ -59,32 +59,32 @@ describe('{#snippet} / {@render}', () => {
 
 	test('snippet declared in an if branch is not visible outside it', async () => {
 		const source = '{#if false}{#snippet local()}Hi{/snippet}{/if}{@render local()}'
-		expect(lint(source).map(diagnostic => diagnostic.code)).toContain('G3005')
+		expect((await lint(source)).map(diagnostic => diagnostic.code)).toContain('G3005')
 		await expect(render(source)).rejects.toBeInstanceOf(GalleyDiagnosticError)
 	})
 
 	test('snippet declared in a loop is not visible outside it', async () => {
 		const source = '{#each items as item}{#snippet local()}Hi{/snippet}{/each}{@render local()}'
-		expect(lint(source).map(diagnostic => diagnostic.code)).toContain('G3005')
+		expect((await lint(source)).map(diagnostic => diagnostic.code)).toContain('G3005')
 		await expect(render(source, { items: [] })).rejects.toBeInstanceOf(GalleyDiagnosticError)
 	})
 
 	test('same snippet name is allowed in independent branches', async () => {
 		const source = '{#if first}{#snippet local()}A{/snippet}{@render local()}{:else}{#snippet local()}B{/snippet}{@render local()}{/if}'
-		expect(lint(source).filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
+		expect((await lint(source)).filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
 		expect(await render(source, { first: true })).toBe('A')
 		expect(await render(source, { first: false })).toBe('B')
 	})
 
 	test('nested snippet shadowing cannot replace the outer binding', async () => {
 		const source = '{#snippet local()}OUTER{/snippet}{#if show}{#snippet local()}INNER{/snippet}{@render local()}{/if}{@render local()}'
-		expect(lint(source).filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
+		expect((await lint(source)).filter(diagnostic => diagnostic.severity === 'error')).toEqual([])
 		expect(await render(source, { show: true })).toBe('INNEROUTER')
 	})
 
 	test('unrendered nested snippet cannot affect an outer render', async () => {
 		const source = '{#snippet local()}OUTER{/snippet}{#if show}{#snippet local()}INNER{/snippet}{/if}{@render local()}'
-		expect(lint(source).map(diagnostic => diagnostic.code)).toEqual(['G3006'])
+		expect((await lint(source)).map(diagnostic => diagnostic.code)).toEqual(['G3006'])
 		expect(await render(source, { show: true })).toBe('OUTER')
 	})
 

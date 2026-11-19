@@ -20,26 +20,19 @@ const collectExpressionMetadata = (expression, used) => {
                 collectExpressionMetadata(argument, used);
     }
 };
-export const analyze = (ast, dynamicEmptyAttributes = true) => {
+/** Whether a node of that kind stands anywhere in the nodes, the bodies of blocks, snippets and loaded partials included. */
+export const contains = (nodes, kind) => nodes.some(node => node.kind === kind
+    || (node.kind === 'if' && node.branches.some(branch => contains(branch.children, kind)))
+    || ((node.kind === 'each' || node.kind === 'snippet' || node.kind === 'partial') && contains(node.children ?? [], kind)));
+export const analyze = (ast) => {
     const annotate = (nodes, metadata) => {
-        let recentText = '';
         let changed = null;
         for (let index = 0; index < nodes.length; index++) {
             const node = nodes[index];
             let annotated = node;
-            if (node.kind === 'text')
-                recentText += node.value;
             if (node.kind === 'output') {
                 if (metadata)
                     collectExpressionMetadata(node.expression, metadata);
-                if (dynamicEmptyAttributes) {
-                    const openTag = recentText.slice(recentText.lastIndexOf('<'));
-                    const tagInitial = openTag.charCodeAt(1) | 32;
-                    if (tagInitial === 109 && /^<meta\b[^>]*\bcontent=(?:"[^"]*|'[^']*)$/i.test(openTag))
-                        annotated = { ...node, emptyAttribute: 'content' };
-                    else if (tagInitial === 108 && /^<link\b[^>]*\bhref=(?:"[^"]*|'[^']*)$/i.test(openTag))
-                        annotated = { ...node, emptyAttribute: 'href' };
-                }
             }
             else if (node.kind === 'const') {
                 if (metadata)
@@ -67,7 +60,7 @@ export const analyze = (ast, dynamicEmptyAttributes = true) => {
                 const ownMetadata = new Set();
                 annotated = { ...node, children: annotate(node.children, ownMetadata), metadata: ownMetadata };
             }
-            else if (node.kind === 'snippet') {
+            else if (node.kind === 'snippet' || (node.kind === 'partial' && node.children)) {
                 const children = annotate(node.children, metadata);
                 if (children !== node.children)
                     annotated = { ...node, children };
