@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mkorun/galley/main/assets/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/mkorun/galley/main/assets/logo-light.svg" alt="" width="96" height="96">
+  </picture>
+</p>
+
 # galley — Template Engine
 
 Svelte-inspired template engine that compiles templates once into native JS functions. Rendering executes those functions with targeted URL-prefix validation, without an HTML parser.
