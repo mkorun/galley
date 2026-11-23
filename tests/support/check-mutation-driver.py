@@ -7,8 +7,9 @@ import json
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 sys.dont_write_bytecode = True
 root = Path(__file__).resolve().parents[2]
@@ -26,13 +27,15 @@ class CampaignTests(unittest.TestCase):
         self.fixture = Path(temporary.name)
         for name in ['compiler', 'tests/support', 'differential', 'node_modules']:
             (self.fixture / name).mkdir(parents=True)
+        (self.fixture / 'node_modules/dependency.txt').write_text('dependency input', encoding='utf-8')
         for name in [*driver.COPY_FILES, 'tests/mutate-context.py', 'tests/example.test.ts', 'tests/fixture.txt',
                      'tests/support/generate-mutants.ts', 'differential/corpus.json', 'differential/pins.json']:
             (self.fixture / name).write_text('input')
         self.equivalents = self.fixture / 'tests/support/mutation-equivalents.json'
         self.equivalents.write_text('{}')
         self.source = self.fixture / 'compiler/context.ts'
-        self.source.write_text('original')
+        self.original = 'original'
+        self.source.write_text(self.original, encoding='utf-8')
         self.tracked = [p.relative_to(self.fixture).as_posix() for folder in ['compiler', 'tests', 'differential']
                         for p in (self.fixture / folder).rglob('*') if p.is_file()]
         (self.fixture / 'tests/scratch.test.ts').write_text('untracked failing test')
@@ -57,7 +60,7 @@ class CampaignTests(unittest.TestCase):
                 finally:
                     copied_source = Path(directory) / 'compiler/context.ts'
                     if copied_source.exists():
-                        self.assertEqual(copied_source.read_text(), 'original', 'mutant was not restored')
+                        self.assertEqual(copied_source.read_text(encoding='utf-8'), self.original, 'mutant was not restored')
 
         for replacement in [patch.object(driver, 'ROOT', self.fixture), patch.object(sys, 'argv', ['tests/mutate-context.py']),
                             patch.object(driver.subprocess, 'run', side_effect=self.invoke),
@@ -72,15 +75,16 @@ class CampaignTests(unittest.TestCase):
         if command == ['git', 'ls-files', '-z', '--', 'compiler', 'tests', 'differential']:
             return subprocess.CompletedProcess(command, 0, ('\0'.join(self.tracked) + '\0').encode(), b'')
         if command == ['bun', '--version']:
-            return subprocess.CompletedProcess(command, 0, 'test-bun\n' if kwargs.get('text') else b'test-bun\n', '')
+            return subprocess.CompletedProcess(command, 0, 'test-bun\n', '')
         if command == ['bun', 'tests/support/generate-mutants.ts']:
             if self.require_copied_generator:
                 assert target != self.fixture, 'generate mutants inside the execution copy'
-                assert (target / 'node_modules').resolve() == self.fixture / 'node_modules'
+                assert (target / 'node_modules').resolve() != (self.fixture / 'node_modules').resolve()
+                assert (target / 'node_modules/dependency.txt').read_text(encoding='utf-8') == 'dependency input'
                 assert (target / 'tests/support/generate-mutants.ts').read_text() == 'input'
             return subprocess.CompletedProcess(command, 0, json.dumps(self.mutations), '')
         assert command[:5] == ['bun', 'test', '--bail', '--preload', './tests/support/mutation-budget.ts']
-        assert target != self.fixture and self.source.read_text() == 'original'
+        assert target != self.fixture and self.source.read_text(encoding='utf-8') == self.original
         assert not (target / 'tests/scratch.test.ts').exists(), 'untracked tests must not run'
         for name in self.tracked:
             assert (target / name).is_file(), f'tracked input missing: {name}'
@@ -88,7 +92,8 @@ class CampaignTests(unittest.TestCase):
         full = len(command) == 5
         if not full:
             assert command[5:] == driver.TESTS
-        mutated = (target / self.mutant['file']).read_text() == 'mutated'
+        replacement = self.original[:self.mutant['start']] + self.mutant['after'] + self.original[self.mutant['end']:]
+        mutated = (target / self.mutant['file']).read_text(encoding='utf-8') == replacement
         stage = ('mutant' if mutated else 'baseline') + (' full' if full else ' focused')
         self.calls.append(stage)
         self.assertEqual(kwargs['timeout'], 600 if full else 15 if mutated else 30)
@@ -106,13 +111,63 @@ class CampaignTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as caught:
             driver.run()
         self.assertIn(message, str(caught.exception))
-        self.assertEqual(self.source.read_text(), 'original')
+        self.assertEqual(self.source.read_text(encoding='utf-8'), self.original)
         self.assertTrue(all(not target.exists() for target in self.copies), 'failed campaign left a copy')
         return caught.exception
 
     def test_generates_inside_copy(self):
         self.require_copied_generator = True
         driver.run()
+
+    def test_dependency_copy_needs_no_symlink_privileges_and_is_independent(self):
+        invoke = self.invoke
+        self.require_copied_generator = True
+
+        def change_dependency(command, **kwargs):
+            result = invoke(command, **kwargs)
+            if command == ['bun', 'tests/support/generate-mutants.ts']:
+                (kwargs['cwd'] / 'node_modules/dependency.txt').write_text('changed in copy', encoding='utf-8')
+            return result
+
+        with patch.object(Path, 'symlink_to', side_effect=OSError('symlinks require privileges')), \
+                patch.object(driver.subprocess, 'run', side_effect=change_dependency):
+            driver.run()
+        self.assertEqual((self.fixture / 'node_modules/dependency.txt').read_text(encoding='utf-8'), 'dependency input')
+
+    def test_dependency_copy_failure_is_clear(self):
+        with patch.object(driver.shutil, 'copytree', side_effect=OSError('dependency unavailable')):
+            self.campaign_fails('cannot copy dependencies: dependency unavailable')
+        self.assertEqual(self.calls, [])
+
+    def test_handled_signal_restores_mutant_and_removes_copy(self):
+        invoke = self.invoke
+
+        def interrupt(command, **kwargs):
+            result = invoke(command, **kwargs)
+            if self.calls == ['baseline focused', 'baseline full', 'mutant focused']:
+                driver.terminate(driver.signal.SIGTERM, None)
+            return result
+
+        with patch.object(driver.subprocess, 'run', side_effect=interrupt):
+            error = self.campaign_fails(str(128 + driver.signal.SIGTERM))
+        self.assertEqual(error.code, 128 + driver.signal.SIGTERM)
+
+    def test_mutations_preserve_utf8_and_lf(self):
+        self.original = 'original\n// café → template\n'
+        self.source.write_bytes(self.original.encode('utf-8'))
+        invoke = self.invoke
+
+        def inspect_bytes(command, **kwargs):
+            if command[:2] == ['bun', 'test']:
+                source = kwargs['cwd'] / self.mutant['file']
+                contents = source.read_bytes()
+                self.assertNotIn(b'\r', contents)
+                self.assertIn('café → template'.encode('utf-8'), contents)
+            return invoke(command, **kwargs)
+
+        with patch.object(driver.subprocess, 'run', side_effect=inspect_bytes):
+            driver.run()
+        self.assertEqual(self.source.read_bytes(), self.original.encode('utf-8'))
 
     def test_always_fresh_and_reports_each_outcome(self):
         self.mutations += [dict(self.mutant, id='reviewed', kind='equivalent test')]
@@ -308,8 +363,19 @@ class CampaignTests(unittest.TestCase):
                 self.assertEqual(self.calls, [])
 
 
+class EntryPointTests(unittest.TestCase):
+    def test_registers_only_signals_available_on_the_platform(self):
+        for names in [('SIGINT', 'SIGTERM'), ('SIGINT', 'SIGTERM', 'SIGHUP')]:
+            signals = SimpleNamespace(signal=Mock(), **{name: index + 1 for index, name in enumerate(names)})
+            with self.subTest(names=names), patch.object(driver, 'signal', signals), patch.object(driver, 'run') as run:
+                driver.main()
+            expected = [call(getattr(signals, name), driver.terminate) for name in names]
+            self.assertEqual(signals.signal.call_args_list, expected)
+            run.assert_called_once_with()
+
+
 if __name__ == '__main__':
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(CampaignTests)
+    suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise SystemExit(1)

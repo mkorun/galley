@@ -45,7 +45,7 @@ def copy_inputs(target):
 
 def execute(command, target, timeout):
     try:
-        return subprocess.run(command, cwd=target, env=CHILD_ENV, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(command, cwd=target, env=CHILD_ENV, capture_output=True, encoding='utf-8', timeout=timeout)
     except FileNotFoundError as error:
         raise SystemExit(f'Mutation driver requires {command[0]} on PATH') from error
     except subprocess.TimeoutExpired as error:
@@ -84,7 +84,7 @@ def generate_mutations(target):
             path = Path(mutant['file'])
             if path.is_absolute() or '..' in path.parts or len(path.parts) < 2 or path.parts[0] != 'compiler':
                 raise ValueError('mutant file must be inside compiler')
-            original = (target / path).read_text()
+            original = (target / path).read_text(encoding='utf-8')
             if not (0 <= mutant['start'] < mutant['end'] <= len(original)) or mutant['line'] < 1:
                 raise ValueError('invalid mutant offsets or line')
             if original[mutant['start']:mutant['end']] != mutant['before'] or mutant['after'] == mutant['before']:
@@ -104,7 +104,7 @@ def terminate(signum, _frame):
 
 def read_equivalents(target, mutations):
     try:
-        equivalents = json.loads((target / 'tests/support/mutation-equivalents.json').read_text())
+        equivalents = json.loads((target / 'tests/support/mutation-equivalents.json').read_text(encoding='utf-8'))
         if not isinstance(equivalents, dict) or any(not isinstance(reason, str) or not reason.strip() for reason in equivalents.values()):
             raise ValueError('expected an object of nonempty reviewed reasons')
     except (ValueError, OSError) as error:
@@ -121,7 +121,10 @@ def run():
     with tempfile.TemporaryDirectory(prefix='galley-mutations-') as directory:
         target = Path(directory)
         copy_inputs(target)
-        (target / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
+        try:
+            shutil.copytree(ROOT / 'node_modules', target / 'node_modules')
+        except OSError as error:
+            raise SystemExit(f'Mutation driver: cannot copy dependencies: {error}') from error
         result = execute(['bun', '--version'], target, 10)
         version = result.stdout.strip()
         if result.returncode or not version or '\n' in version:
@@ -142,8 +145,8 @@ def run():
         killed = reviewed = survivors = confirmed = 0
         for mutant in mutations:
             file = target / mutant['file']
-            original = file.read_text()
-            file.write_text(original[:mutant['start']] + mutant['after'] + original[mutant['end']:])
+            original = file.read_text(encoding='utf-8')
+            file.write_bytes((original[:mutant['start']] + mutant['after'] + original[mutant['end']:]).encode('utf-8'))
             try:
                 reason = equivalents.get(mutant['id'])
                 if check_equivalents:
@@ -158,7 +161,7 @@ def run():
                                 raise SystemExit(f'Fallback kill was not confirmed (inconclusive): {mutant["id"]}')
                             confirmed += 1
             finally:
-                file.write_text(original)
+                file.write_bytes(original.encode('utf-8'))
             if failures:
                 if reason:
                     raise SystemExit(f'Obsolete equivalence, now killed: {mutant["id"]}')
@@ -180,7 +183,12 @@ def run():
         raise SystemExit('Unreviewed survivors; see the campaign outcomes above.')
 
 
-if __name__ == '__main__':
-    signal.signal(signal.SIGTERM, terminate)
-    signal.signal(signal.SIGHUP, terminate)
+def main():
+    for name in ['SIGINT', 'SIGTERM', 'SIGHUP']:
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), terminate)
     run()
+
+
+if __name__ == '__main__':
+    main()

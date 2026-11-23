@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runChromium } from '../differential/chromium.js'
 import { expect, test } from 'bun:test'
 import { encode, decode, extend, generate, random, SEED, type Fixture } from '../differential/model.js'
@@ -8,6 +9,23 @@ import { forbidden, nearMiss, replay, violations, type Violation } from '../diff
 import { browserPage, readBrowserOutput } from '../differential/browser.js'
 
 const fixture = (overrides: Partial<Fixture> = {}): Fixture => ({ id: 'fixture', source: '<a href="{ a }">', data: { a: '/x' }, expected: '<a href="/x">', writes: [{ attribute: 'href', serialized: '/x', cause: 'first' }], html: '<a href="GALLEY_SLOT">', slot: 'href', ...overrides })
+
+// Exercise file URLs through the real browser, including native Windows temporary paths.
+const withBrowserTemp = async (run: () => Promise<void>) => {
+	const directory = await mkdtemp(join(tmpdir(), 'galley browser # %-'))
+	const keys = ['TMPDIR', 'TMP', 'TEMP']
+	const previous = keys.map(key => process.env[key])
+	try {
+		for (const key of keys) process.env[key] = directory
+		await run()
+	} finally {
+		keys.forEach((key, index) => {
+			if (previous[index] === undefined) delete process.env[key]
+			else process.env[key] = previous[index]
+		})
+		await rm(directory, { recursive: true, force: true })
+	}
+}
 
 test('differential PRNG independently agrees far into its stream and bounded generation is reproducible', () => {
 	let reference = BigInt(SEED)
@@ -72,7 +90,7 @@ test('browser transport rejects absent/malformed observations and safely quotes 
 	expect(() => readBrowserOutput('<pre></pre>')).toThrow('Chromium returned no oracle observations')
 })
 
-test('required Chromium differential and committed corpus replay', async () => {
+test('required Chromium differential and committed corpus replay', async () => withBrowserTemp(async () => {
 	const recorded = Bun.file(new URL('../differential/RESULT.json', import.meta.url))
 	const before = await recorded.text()
 	const argv = process.argv
@@ -88,7 +106,7 @@ test('required Chromium differential and committed corpus replay', async () => {
 	expect(result.cases).toBe(1002)
 	expect([result.boundary, result.snippet, result.foreign, result.numeric]).toEqual([168, 120, 120, 0])
 	expect(result.seed).toBe('0x20261117')
-}, 30000)
+}), 31000)
 
 
 test('oracle preserves secondary slot failures and actual near-miss branch causes', () => {
@@ -154,7 +172,7 @@ test('oracle visits only HTML template contents in a foreign-content batch', asy
 	try {
 		const path = join(directory, 'page.html')
 		await Bun.write(path, browserPage(html.map(value => fixture({ html: value }))))
-		const child = runChromium(['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], 10000)
+		const child = runChromium(['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', pathToFileURL(path).href], 10000)
 		expect(child.exitCode).toBe(0)
 		expect(readBrowserOutput(new TextDecoder().decode(child.stdout))).toEqual(html.map(() => ({ decoded: ['/x'], slots: ['href'] })))
 	} finally { await rm(directory, { recursive: true, force: true }) }
@@ -198,7 +216,7 @@ test('strict differential families run real compile, render and fresh Chromium f
 	expect(report.foreign.noForeignEntry + report.foreign.refused + report.foreign.observed).toBe(report.foreign.cases)
 	expect(report.foreign.browserForeignAmongAccepted).toBe(0)
 	expect(report.text.pairs).toBe(144)
-}, 30000)
+}, 56000)
 
 test('strict family oracle detects planted name, text-owner and foreign-count disagreements', async () => {
 	const browser = await import('../differential/strict-browser.js')
@@ -215,9 +233,9 @@ test('strict family oracle detects planted name, text-owner and foreign-count di
 	const unknown = Bun.spawnSync(['bun', 'differential/strict-run.ts', '--bad'], { timeout: 10000, stdout: 'pipe', stderr: 'pipe' })
 	expect(unknown.exitCode).not.toBe(0)
 	expect(new TextDecoder().decode(unknown.stderr)).toContain('usage: bun differential/strict-run.ts')
-})
+}, 11000)
 
-test('strict Chromium transport reports planted URL, name, tag and comment markers', async () => {
+test('strict Chromium transport reports planted URL, name, tag and comment markers', async () => withBrowserTemp(async () => {
 	const { observeStrict } = await import('../differential/strict-browser.js')
 	const html = ['<a href="javascript:M1=1 N1=2">', '<div n1="value">', '<n1></n1>', '<!--javascript:M1=1 N1=2-->']
 	const readings = await observeStrict(html.map((value, index) => ({ id: `planted-${index}`, html: value, kind: 'places' })))
@@ -226,7 +244,7 @@ test('strict Chromium transport reports planted URL, name, tag and comment marke
 	expect(readings[1]?.places).toContain('1|name')
 	expect(readings[2]?.places).toContain('1|tag')
 	expect(readings[3]?.places).toContain('1|comment')
-}, 10000)
+}), 56000)
 
 
 test('G-31: placement oracle folds foreignObject and checks plain text parents', async () => {
@@ -238,4 +256,4 @@ test('G-31: placement oracle folds foreignObject and checks plain text parents',
 	}
 	const [reading] = await observeStrict([{ id: 'G-31-foreignObject', html: '<svg><foreignObject>GALLEY_TEXT&lt;i data-galley-probe&gt;</foreignObject></svg>', kind: 'text', owner: 'foreignobject' }])
 	expect(reading?.text).toBe(true)
-})
+}, 56000)

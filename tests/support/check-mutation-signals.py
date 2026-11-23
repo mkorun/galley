@@ -1,4 +1,4 @@
-"""Send SIGTERM and SIGHUP to the real driver while its baseline child is running in the copy."""
+"""Send supported signals to the real driver while its baseline child is running in the copy."""
 from pathlib import Path
 from textwrap import dedent
 import json
@@ -11,7 +11,13 @@ import tempfile
 import time
 
 root = Path(__file__).resolve().parents[2]
-for signum in [signal.SIGTERM, signal.SIGHUP]:
+if os.name == 'nt':
+    print('Real-signal checks skipped on Windows; portable handler and cleanup tests run in check-mutation-driver.py')
+    raise SystemExit(0)
+
+signals = [name for name in ['SIGINT', 'SIGTERM', 'SIGHUP'] if hasattr(signal, name)]
+for signal_name in signals:
+    signum = getattr(signal, signal_name)
     with tempfile.TemporaryDirectory(prefix='galley-driver-signal-') as directory:
         fixture = Path(directory)
         for name in ['compiler', 'tests/support', 'differential', 'node_modules', 'bin']:
@@ -59,7 +65,7 @@ for signum in [signal.SIGTERM, signal.SIGHUP]:
             assert Path(ready['directory']).exists()
             child.send_signal(signum)
             stdout, stderr = child.communicate(timeout=10)
-            assert child.returncode == 128 + signum, (stdout, stderr)
+            assert child.returncode == 128 + signum, (signal_name, stdout, stderr)
             assert not Path(ready['directory']).exists(), 'Signal left the mutation copy'
             try:
                 os.kill(ready['pid'], 0)
@@ -79,4 +85,4 @@ for signum in [signal.SIGTERM, signal.SIGHUP]:
                 except ProcessLookupError:
                     pass
                 shutil.rmtree(ready['directory'])
-print('SIGTERM and SIGHUP removed the copy and stopped their children; source unchanged')
+print(f'Real-signal checks passed: {", ".join(signals)} removed the copy and stopped their children; source unchanged')

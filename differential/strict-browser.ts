@@ -2,6 +2,7 @@ import { runChromium } from './chromium.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export interface BrowserCase { id: string; html: string; kind: 'places' | 'foreign' | 'text'; owner?: string }
 export interface BrowserReading { id: string; places: string[]; urls: string[]; foreign: boolean; text: boolean }
@@ -46,7 +47,7 @@ export const observeStrict = async (cases: readonly BrowserCase[], batch = 1000)
 		const path = join(directory, 'page.html')
 		await Bun.write(path, strictPage(items))
 		try {
-			const child = runChromium(['--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], 55000)
+			const child = runChromium(['--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', pathToFileURL(path).href], 55000)
 			return readStrictOutput(new TextDecoder().decode(child.stdout), items)
 		} catch (error) {
 			// Diagnose a browser failure by case, never silently drop the batch.

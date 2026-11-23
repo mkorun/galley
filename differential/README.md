@@ -16,7 +16,8 @@ Reviewed reasons live in `tests/support/mutation-equivalents.json`; stale entrie
 After adding or changing an entry, run `python3 tests/mutate-context.py --equivalents` (about a minute per entry).
 It baselines both commands in the same isolated copy, then checks only the reviewed mutants against the full suite.
 A kill found only by the full suite is caught by `--equivalents`.
-The driver restores each mutant, bounds subprocesses, keeps the loop budget, and cleans up on SIGTERM and SIGHUP.
+The driver restores each mutant, bounds subprocesses, keeps the loop budget, and cleans up on SIGINT, SIGTERM and,
+where the system has it, SIGHUP.
 
 Commit the changes, then run `./check.sh --release` from a clean tree. It requires gitleaks, runs the ordinary checks,
 then one complete campaign, and checks the tree again, including untracked files and ignored files under `dist/`.

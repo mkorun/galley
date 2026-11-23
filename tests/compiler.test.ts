@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import galley, { GalleyDiagnosticError, lint } from '../index'
 import util from '../util'
+import { fileURLToPath } from 'node:url'
 
 // The legacy oracle lives outside this repo (private/, a maintainer-only
 // benchmark/conformance workspace) and is never published or cloned with
@@ -72,11 +73,14 @@ describe('AST compiler baseline', () => {
 
 	test('compiler production patterns avoid unsupported RE2 constructs', async () => {
 		const directory = new URL('../compiler/', import.meta.url)
-		for await (const file of new Bun.Glob('*.ts').scan(directory.pathname)) {
+		let files = 0
+		for await (const file of new Bun.Glob('*.ts').scan(fileURLToPath(directory))) {
+			files++
 			const source = await Bun.file(new URL(`../compiler/${file}`, import.meta.url)).text()
 			expect(source).not.toMatch(/\(\?<?[=!]/)
 			expect(source).not.toMatch(/\\[1-9]/)
 		}
+		expect(files).toBeGreaterThan(0)
 	})
 
 	test('renders escaped/raw output, conditions, loops and fallbacks', async () => {

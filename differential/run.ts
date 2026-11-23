@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runChromium } from './chromium.js'
 import galley from '../index.js'
 import util from '../util.js'
@@ -24,7 +25,7 @@ let browser
 try {
 	const path = join(directory, 'page.html')
 	await Bun.write(path, browserPage(fixtures))
-	browser = runChromium(['--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], 30000)
+	browser = runChromium(['--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', pathToFileURL(path).href], 30000)
 } finally { await rm(directory, { recursive: true, force: true }) }
 const observations = readBrowserOutput(new TextDecoder().decode(browser.stdout))
 if (observations.length !== fixtures.length) throw new Error('Browser case count differs')

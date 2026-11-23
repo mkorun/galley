@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,7 @@ root = Path(__file__).resolve().parents[2]
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory(prefix='galley-release-arguments-')
+        temporary = tempfile.TemporaryDirectory(prefix='galley release arguments ')
         self.addCleanup(temporary.cleanup)
         self.target = Path(temporary.name)
         (self.target / 'bin').mkdir()
@@ -21,12 +22,17 @@ class ReleaseTests(unittest.TestCase):
         (self.target / 'tests/support/check-release-tree.sh').write_text('exec release-tree\n')
         shutil.copyfile(root / 'check.sh', self.target / 'check.sh')
         for name in ['bash', 'dirname']:
-            (self.target / 'bin' / name).symlink_to(shutil.which(name))
-        stub = self.target / 'bin/tool'
-        stub.write_text(f'#!{sys.executable}\n' + '''from pathlib import Path
+            executable = shutil.which(name)
+            if executable is None:
+                raise RuntimeError(f'Gate tests require {name} on PATH')
+            wrapper = self.target / 'bin' / name
+            wrapper.write_bytes(('#!/bin/sh\nexec ' + shlex.quote(Path(executable).as_posix()) + ' "$@"\n').encode('utf-8'))
+            wrapper.chmod(0o755)
+        stub = self.target / 'bin/tool.py'
+        stub.write_bytes('''from pathlib import Path
 import json, os, sys
-name = Path(sys.argv[0]).name
-arguments = sys.argv[1:]
+name = sys.argv[1]
+arguments = sys.argv[2:]
 with Path('calls.jsonl').open('a') as log:
     log.write(json.dumps([name, *arguments]) + '\\n')
 if name == 'git':
@@ -51,10 +57,12 @@ elif name == 'python3':
     sys.exit(int(os.environ.get('DRIVER_EXIT', '0')))
 elif name == os.environ.get('FAIL_TOOL'):
     sys.exit(74)
-''')
-        stub.chmod(0o755)
+'''.encode('utf-8'))
         for name in ['git', 'python3', 'bun', 'gitleaks', 'release-tree']:
-            (self.target / 'bin' / name).symlink_to(stub)
+            wrapper = self.target / 'bin' / name
+            command = ' '.join(shlex.quote(value) for value in [Path(sys.executable).as_posix(), stub.as_posix(), name])
+            wrapper.write_bytes(f'#!/bin/sh\nexec {command} "$@"\n'.encode('utf-8'))
+            wrapper.chmod(0o755)
         self.environment = os.environ | {'PATH': str(self.target / 'bin')}
         self.ordinary = [
             ['release-tree'], ['python3', 'tests/mutate-context.py', '--list'],

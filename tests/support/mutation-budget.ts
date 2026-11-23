@@ -3,8 +3,9 @@ import ts from 'typescript'
 import { plugin } from 'bun'
 let remaining = 5_000_000
 ;globalThis.__mutationStep = () => { if (--remaining < 0) throw new Error('G-32: deterministic loop budget exhausted') }
+export const compilerPath = /[\\/]compiler[\\/][^\\/]+\.ts$/
 plugin({ name: 'mutation-loop-budget', setup(build) {
-	build.onLoad({ filter: /\/compiler\/[^/]+\.ts$/ }, async args => {
+	build.onLoad({ filter: compilerPath }, async args => {
 		let contents = await Bun.file(args.path).text()
 		const ast = ts.createSourceFile(args.path, contents, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 		const edits: { at: number; text: string }[] = []

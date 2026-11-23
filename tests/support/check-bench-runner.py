@@ -13,6 +13,7 @@ root = Path(__file__).resolve().parents[2]
 runner = root / 'tests/bench/measure.py'
 
 with tempfile.TemporaryDirectory(prefix='galley-bench-test-') as directory:
+    directory = Path(directory).resolve()
     main, branch = str(Path(directory) / 'main'), str(Path(directory) / 'branch')
     for options, rounds in [([], 8), (['--rounds', '4'], 4)]:
         output = Path(directory) / str(rounds) / 'results'

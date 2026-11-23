@@ -18,4 +18,4 @@ test('G-23 template end-tag neighbors keep markers in title text', async () => {
 		expect(reading.places).toEqual(['1|text:title'])
 		expect(reading.urls).toEqual([])
 	}
-}, 10000)
+}, 56000)
