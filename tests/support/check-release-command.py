@@ -42,6 +42,10 @@ if name == 'git':
         assert arguments == ['diff', '--exit-code', '--', 'dist'], arguments
         sys.exit(int(os.environ.get('DIST_CHANGED', '0')))
 elif name == 'python3':
+    if arguments == ['tests/mutate-context.py', '--list']:
+        print(os.environ.get('LIST_MESSAGE', 'equivalence list valid'))
+        sys.exit(int(os.environ.get('LIST_EXIT', '0')))
+    assert arguments == ['tests/mutate-context.py'], arguments
     Path('driver-ran').touch()
     print(os.environ.get('DRIVER_MESSAGE', 'campaign completed'))
     sys.exit(int(os.environ.get('DRIVER_EXIT', '0')))
@@ -53,7 +57,8 @@ elif name == os.environ.get('FAIL_TOOL'):
             (self.target / 'bin' / name).symlink_to(stub)
         self.environment = os.environ | {'PATH': str(self.target / 'bin')}
         self.ordinary = [
-            ['release-tree'], ['bun', 'run', 'typecheck'], ['bun', 'test', '--coverage'], ['bun', 'run', 'build'],
+            ['release-tree'], ['python3', 'tests/mutate-context.py', '--list'],
+            ['bun', 'run', 'typecheck'], ['bun', 'test', '--coverage'], ['bun', 'run', 'build'],
             ['git', 'diff', '--exit-code', '--', 'dist'], ['gitleaks', 'git', '.', '--redact', '--no-banner', '--log-level', 'warn'],
         ]
         self.status = [
@@ -74,6 +79,15 @@ elif name == os.environ.get('FAIL_TOOL'):
         result = self.gate([], {'DRIVER_EXIT': '75'})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls, self.ordinary)
+
+    def test_plain_gate_rejects_bad_equivalence_list_before_tests(self):
+        for message in ['Stale equivalence entries', 'Mutation campaign: invalid equivalence list']:
+            with self.subTest(message=message):
+                result = self.gate([], {'LIST_EXIT': '1', 'LIST_MESSAGE': message})
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(message, result.stdout)
+                self.assertEqual(self.calls, self.ordinary[:2])
+                self.assertFalse((self.target / 'driver-ran').exists())
 
     def test_release_runs_exactly_one_campaign_after_ordinary_checks(self):
         result = self.gate(['--release'])

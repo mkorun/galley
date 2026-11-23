@@ -20,6 +20,7 @@ spec.loader.exec_module(driver)
 
 class CampaignTests(unittest.TestCase):
     def setUp(self):
+        self.real_run = subprocess.run
         temporary = tempfile.TemporaryDirectory(prefix='galley-driver-test-')
         self.addCleanup(temporary.cleanup)
         self.fixture = Path(temporary.name)
@@ -86,10 +87,11 @@ class CampaignTests(unittest.TestCase):
         self.copies.append(target)
         full = len(command) == 5
         if not full:
-            assert command[5:7] == ['--test-name-pattern', '^(?!G-29:)']
+            assert command[5:] == driver.TESTS
         mutated = (target / self.mutant['file']).read_text() == 'mutated'
         stage = ('mutant' if mutated else 'baseline') + (' full' if full else ' focused')
         self.calls.append(stage)
+        self.assertEqual(kwargs['timeout'], 600 if full else 15 if mutated else 30)
         if stage == self.timeout_at:
             raise subprocess.TimeoutExpired(command, kwargs['timeout'])
         if mutated and self.malformed_output is not None:
@@ -101,7 +103,7 @@ class CampaignTests(unittest.TestCase):
         return subprocess.CompletedProcess(command, int(bool(label)), '', output)
 
     def campaign_fails(self, message):
-        with self.assertRaises((SystemExit, RuntimeError, AssertionError, subprocess.TimeoutExpired)) as caught:
+        with self.assertRaises(SystemExit) as caught:
             driver.run()
         self.assertIn(message, str(caught.exception))
         self.assertEqual(self.source.read_text(), 'original')
@@ -169,16 +171,30 @@ class CampaignTests(unittest.TestCase):
             with self.subTest(stage=stage):
                 self.timeout_at = stage
                 self.focused = []
-                error = self.campaign_fails('')
-                self.assertRegex(str(error), 'timeout|timed out')
+                self.campaign_fails('Mutation campaign timeout after ')
                 self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_bun_per_test_timeout_stops_campaign_and_names_test(self):
+        (self.fixture / 'bunfig.toml').write_text('')
+        (self.fixture / 'tsconfig.json').write_text('{}')
+        test = self.fixture / 'tests/timeout.test.ts'
+        test.write_text("import { test } from 'bun:test'\n"
+                        "test('pause resolves', async () => { await Bun.sleep(400) }, 100)\n")
+        result = self.real_run(['bun', 'test', str(test)], cwd=self.fixture,
+                               env=driver.CHILD_ENV, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('this test timed out after', result.stdout + result.stderr)
+        self.malformed_output = (result.returncode, result.stdout + result.stderr)
+        error = self.campaign_fails('Bun test timeout')
+        self.assertIn('pause resolves', str(error))
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full', 'mutant focused'])
+        self.assertNotIn(': killed:', self.output.getvalue())
 
     def test_baseline_timeout_is_never_a_kill(self):
         for stage in ['baseline focused', 'baseline full']:
             with self.subTest(stage=stage):
                 self.timeout_at = stage
-                error = self.campaign_fails('')
-                self.assertRegex(str(error), 'timeout|timed out')
+                self.campaign_fails('Mutation campaign timeout after ')
                 self.assertNotIn(': killed:', self.output.getvalue())
 
     def test_malformed_test_output_has_no_outcome(self):
@@ -220,6 +236,48 @@ class CampaignTests(unittest.TestCase):
         self.equivalents.write_text('{"example": "Obsolete review"}')
         self.campaign_fails('Obsolete equivalence')
 
+    def test_equivalents_full_suite_kill_fails(self):
+        self.focused = []
+        self.full = ['assertion outside focused tests']
+        self.equivalents.write_text('{"example": "Reviewed fixture equivalence"}')
+        with patch.object(sys, 'argv', ['tests/mutate-context.py', '--equivalents']):
+            self.campaign_fails('Obsolete equivalence, now killed: example')
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full', 'mutant full'])
+        self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_equivalents_runs_only_reviewed_mutants_and_passes(self):
+        self.mutations.insert(0, dict(self.mutant, id='unreviewed'))
+        self.equivalents.write_text('{"example": "Reviewed fixture equivalence"}')
+        self.full = []
+        with patch.object(sys, 'argv', ['tests/mutate-context.py', '--equivalents']):
+            driver.run()
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full', 'mutant full'])
+        self.assertIn('1 reviewed equivalents passed the full suite.', self.output.getvalue())
+        self.assertEqual(self.output.getvalue().count('compiler/context.ts:'), 1)
+
+    def test_equivalents_requires_passing_baselines(self):
+        self.equivalents.write_text('{"example": "Reviewed fixture equivalence"}')
+        self.baseline_failure = 'broken full-suite baseline'
+        with patch.object(sys, 'argv', ['tests/mutate-context.py', '--equivalents']):
+            self.campaign_fails('Unmutated full-suite baseline failed')
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full'])
+
+    def test_list_generates_in_copy_and_checks_equivalences_without_tests(self):
+        self.require_copied_generator = True
+        self.equivalents.write_text('{"example": "Reviewed fixture equivalence"}')
+        with patch.object(sys, 'argv', ['tests/mutate-context.py', '--list']):
+            driver.run()
+        self.assertEqual(self.calls, [])
+        self.assertIn('1 generated; 1 reviewed equivalence entries valid.', self.output.getvalue())
+
+    def test_list_rejects_stale_and_invalid_equivalences_without_tests(self):
+        for entries, message in [('{"missing": "Stale review"}', 'Stale equivalence'),
+                                 ('{"example": ""}', 'invalid equivalence list')]:
+            with self.subTest(entries=entries), patch.object(sys, 'argv', ['tests/mutate-context.py', '--list']):
+                self.equivalents.write_text(entries)
+                self.campaign_fails(message)
+                self.assertEqual(self.calls, [])
+
     def test_invalid_equivalences_fail(self):
         for entries in ['[]', '{"example": ""}', '{"example": null}', 'not json']:
             with self.subTest(entries=entries):
@@ -244,7 +302,7 @@ class CampaignTests(unittest.TestCase):
                 self.assertIn(message, str(caught.exception))
 
     def test_arguments_are_rejected(self):
-        for arguments in [['--force'], ['--unknown'], ['extra']]:
+        for arguments in [['--force'], ['--unknown'], ['extra'], ['--list', '--equivalents']]:
             with self.subTest(arguments=arguments), patch.object(sys, 'argv', ['tests/mutate-context.py', *arguments]):
                 self.campaign_fails('usage: python3 tests/mutate-context.py')
                 self.assertEqual(self.calls, [])

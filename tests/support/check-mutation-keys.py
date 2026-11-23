@@ -7,17 +7,17 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 generator = str(root / 'tests/support/generate-mutants.ts')
 
-def inventory(directory):
+def generate_mutations(directory):
     return json.loads(subprocess.run(['bun', generator], cwd=directory, capture_output=True, text=True, check=True, timeout=30).stdout)
 
-original = inventory(root)
+original = generate_mutations(root)
 with tempfile.TemporaryDirectory(prefix='galley-mutation-keys-') as directory:
     target = Path(directory)
     for file in {mutant['file'] for mutant in original}:
         path = target / file
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('// Earlier unrelated source lines must not change equivalence keys.\n\n' + (root / file).read_text())
-    shifted = inventory(target)
+    shifted = generate_mutations(target)
 assert [m['id'] for m in original] == [m['id'] for m in shifted]
 assert all(b['start'] > a['start'] for a, b in zip(original, shifted))
 assert any(m['kind'] == 'delete statement' and '.push(' in m['before'] for m in original)

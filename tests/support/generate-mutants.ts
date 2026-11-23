@@ -1,4 +1,4 @@
-/** Mechanical mutation inventory. Uses the installed TypeScript parser, never text guesses about expressions. */
+/** Mechanical compiler mutations. Uses the installed TypeScript parser, never text guesses about expressions. */
 import ts from 'typescript'
 const mutants: { file: string; start: number; end: number; before: string; after: string; kind: string; line: number; id: string }[] = []
 for (const file of ['compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts']) {

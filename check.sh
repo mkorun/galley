@@ -24,6 +24,7 @@ elif [[ $# -ne 0 ]]; then
   exit 2
 fi
 bash tests/support/check-release-tree.sh
+python3 tests/mutate-context.py --list
 bun run typecheck
 bun test --coverage
 bun run build

@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-COPY_FILES = ['index.ts', 'types.ts', 'util.ts', 'bun.lock', 'bunfig.toml', 'tsconfig.json', 'tsconfig.typecheck.json', 'check.sh']
+COPY_FILES = ['index.ts', 'types.ts', 'util.ts', 'bunfig.toml', 'tsconfig.json', 'check.sh']
 # The generator owns the mutated-file list; the focused test selection is a separate execution concern.
 TESTS = ['tests/' + name for name in ['strict-acceptor.test.ts', 'mechanical-reader.test.ts', 'second-correction.test.ts', 'url-static-start.test.ts', 'url-static-suffix.test.ts', 'url-end-check.test.ts', 'mutation-flow.test.ts', 'lint-mutations.test.ts', 'third-correction.test.ts', 'fourth-correction.test.ts', 'growth-semantics.test.ts', 'config-regression.test.ts', 'comment-search.test.ts', 'lint-async.test.ts', 'context-model.test.ts', 'url-attributes.test.ts', 'review-findings.test.ts', 'stripped-marks.test.ts', 'compiler.test.ts', 'loops.test.ts', 'snippets.test.ts']]
 FAILURE = re.compile(r'^\(fail\) (.+?)(?: \[[0-9.]+ms\])?$', re.MULTILINE)
@@ -56,6 +56,8 @@ def test_failures(command, target, timeout):
     result = execute(command, target, timeout)
     output = result.stdout + result.stderr
     failures = FAILURE.findall(output)
+    if 'this test timed out after' in output:
+        raise SystemExit(f'Mutation campaign: Bun test timeout:\n{output}')
     if result.returncode > 0 and failures:
         return failures
     if result.returncode == 0 and not failures and PASS.search(output) and ZERO_FAILURES.search(output):
@@ -100,9 +102,22 @@ def terminate(signum, _frame):
     raise SystemExit(128 + signum)
 
 
+def read_equivalents(target, mutations):
+    try:
+        equivalents = json.loads((target / 'tests/support/mutation-equivalents.json').read_text())
+        if not isinstance(equivalents, dict) or any(not isinstance(reason, str) or not reason.strip() for reason in equivalents.values()):
+            raise ValueError('expected an object of nonempty reviewed reasons')
+    except (ValueError, OSError) as error:
+        raise SystemExit(f'Mutation campaign: invalid equivalence list: {error}') from error
+    if set(equivalents) - {m['id'] for m in mutations}:
+        raise SystemExit('Stale equivalence entries')
+    return equivalents
+
+
 def run():
-    if sys.argv[1:]:
-        raise SystemExit('usage: python3 tests/mutate-context.py')
+    if sys.argv[1:] not in [[], ['--equivalents'], ['--list']]:
+        raise SystemExit('usage: python3 tests/mutate-context.py [--equivalents | --list]')
+    check_equivalents = sys.argv[1:] == ['--equivalents']
     with tempfile.TemporaryDirectory(prefix='galley-mutations-') as directory:
         target = Path(directory)
         copy_inputs(target)
@@ -113,15 +128,13 @@ def run():
             raise SystemExit(f'Mutation campaign: invalid Bun version output:\n{result.stdout}{result.stderr}')
         print(f'Bun {version}', flush=True)
         mutations = generate_mutations(target)
-        try:
-            equivalents = json.loads((target / 'tests/support/mutation-equivalents.json').read_text())
-            if not isinstance(equivalents, dict) or any(not isinstance(reason, str) or not reason.strip() for reason in equivalents.values()):
-                raise ValueError('expected an object of nonempty reviewed reasons')
-        except (ValueError, OSError) as error:
-            raise SystemExit(f'Mutation campaign: invalid equivalence list: {error}') from error
-        if set(equivalents) - {m['id'] for m in mutations}:
-            raise SystemExit('Stale equivalence entries')
-        focused = ['bun', 'test', '--bail', '--preload', './tests/support/mutation-budget.ts', '--test-name-pattern', '^(?!G-29:)', *TESTS]
+        equivalents = read_equivalents(target, mutations)
+        if sys.argv[1:] == ['--list']:
+            print(f'{len(mutations)} generated; {len(equivalents)} reviewed equivalence entries valid.')
+            return
+        if check_equivalents:
+            mutations = [mutant for mutant in mutations if mutant['id'] in equivalents]
+        focused = ['bun', 'test', '--bail', '--preload', './tests/support/mutation-budget.ts', *TESTS]
         full = ['bun', 'test', '--bail', '--preload', './tests/support/mutation-budget.ts']
         for name, command, timeout in [('focused', focused, 30), ('full-suite', full, 600)]:
             if failures := test_failures(command, target, timeout):
@@ -132,15 +145,18 @@ def run():
             original = file.read_text()
             file.write_text(original[:mutant['start']] + mutant['after'] + original[mutant['end']:])
             try:
-                failures = test_failures(focused, target, 15)
                 reason = equivalents.get(mutant['id'])
-                if not failures and not reason:
+                if check_equivalents:
                     failures = test_failures(full, target, 600)
-                    if failures:
+                else:
+                    failures = test_failures(focused, target, 15)
+                    if not failures and not reason:
                         failures = test_failures(full, target, 600)
-                        if not failures:
-                            raise SystemExit(f'Fallback kill was not confirmed (inconclusive): {mutant["id"]}')
-                        confirmed += 1
+                        if failures:
+                            failures = test_failures(full, target, 600)
+                            if not failures:
+                                raise SystemExit(f'Fallback kill was not confirmed (inconclusive): {mutant["id"]}')
+                            confirmed += 1
             finally:
                 file.write_text(original)
             if failures:
@@ -155,6 +171,9 @@ def run():
                 survivors += 1
                 status = 'SURVIVED'
             print(f'{mutant["file"]}:{mutant["line"]} {mutant["kind"]}: {status}', flush=True)
+    if check_equivalents:
+        print(f'{reviewed} reviewed equivalents passed the full suite.')
+        return
     print(f'{len(mutations)} generated; {killed} killed; {reviewed} equivalent; {survivors} unreviewed survivors.')
     print(f'{confirmed} fallback kills confirmed by a second full-suite run.')
     if survivors:

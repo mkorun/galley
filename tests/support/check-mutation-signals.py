@@ -16,7 +16,7 @@ for signum in [signal.SIGTERM, signal.SIGHUP]:
         fixture = Path(directory)
         for name in ['compiler', 'tests/support', 'differential', 'node_modules', 'bin']:
             (fixture / name).mkdir(parents=True)
-        for name in ['index.ts', 'types.ts', 'util.ts', 'bunfig.toml', 'bun.lock', 'tsconfig.json', 'tsconfig.typecheck.json', 'check.sh', 'differential/corpus.json', 'differential/pins.json']:
+        for name in ['index.ts', 'types.ts', 'util.ts', 'bunfig.toml', 'tsconfig.json', 'check.sh', 'differential/corpus.json', 'differential/pins.json']:
             (fixture / name).write_text('input')
         shutil.copyfile(root / 'tests/mutate-context.py', fixture / 'tests/mutate-context.py')
         (fixture / 'tests/support/mutation-equivalents.json').write_text('{}')
