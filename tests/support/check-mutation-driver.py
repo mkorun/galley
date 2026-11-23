@@ -1,4 +1,4 @@
-"""G-43: copy isolation, complete-run caching, invalidation and failure confirmation."""
+"""G-43: fresh campaigns, isolated inputs, baselines and conclusive outcomes."""
 from pathlib import Path
 import contextlib
 import importlib.util
@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import unittest
 from unittest.mock import patch
 
 sys.dont_write_bytecode = True
@@ -16,204 +17,243 @@ assert spec and spec.loader
 driver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(driver)
 
-for full_suite in [False, True, 'tests/compile-growth.test.ts', 'tests/differential.test.ts', 'tests/template-boundaries.test.ts', 'tests/mutation-driver.test.ts']:
-    with tempfile.TemporaryDirectory(prefix='galley-driver-test-') as directory:
-        fixture = Path(directory)
+
+class CampaignTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='galley-driver-test-')
+        self.addCleanup(temporary.cleanup)
+        self.fixture = Path(temporary.name)
         for name in ['compiler', 'tests/support', 'differential', 'node_modules']:
-            (fixture / name).mkdir(parents=True)
-        for name in ['index.ts', 'types.ts', 'util.ts', 'package.json', 'bunfig.toml', 'bun.lock', 'tsconfig.json', 'tsconfig.typecheck.json', 'check.sh', 'tests/mutate-context.py', 'tests/example.test.ts', 'tests/fixture.txt', 'tests/support/generate-mutants.ts', 'differential/corpus.json', 'differential/pins.json']:
-            (fixture / name).write_text('input')
-        (fixture / 'tests/support/mutation-equivalents.json').write_text('{}')
-        source = fixture / 'compiler/context.ts'
-        source.write_text('original')
-        (fixture / 'compiler/url.ts').write_text('input')
-        (fixture / 'differential/RESULT.json').write_text('record')
-        report = fixture / 'differential/MUTATIONS.md'
-        report.write_text('no previous run\n')
-        mutation = dict(file='compiler/context.ts', start=0, end=8, before='original', after='mutated', kind='test', line=1, id='example')
-        tracked_inputs = [p.relative_to(fixture).as_posix() for folder in ['compiler', 'tests', 'differential']
-                          for p in (fixture / folder).rglob('*') if p.is_file()]
-        (fixture / 'tests/scratch.test.ts').write_text('untracked failing test')
-        calls = []
-        edit_during_run = []
-        killing_test = ['G-43: named assertion']
+            (self.fixture / name).mkdir(parents=True)
+        for name in [*driver.COPY_FILES, 'tests/mutate-context.py', 'tests/example.test.ts', 'tests/fixture.txt',
+                     'tests/support/generate-mutants.ts', 'differential/corpus.json', 'differential/pins.json']:
+            (self.fixture / name).write_text('input')
+        self.equivalents = self.fixture / 'tests/support/mutation-equivalents.json'
+        self.equivalents.write_text('{}')
+        self.source = self.fixture / 'compiler/context.ts'
+        self.source.write_text('original')
+        self.tracked = [p.relative_to(self.fixture).as_posix() for folder in ['compiler', 'tests', 'differential']
+                        for p in (self.fixture / folder).rglob('*') if p.is_file()]
+        (self.fixture / 'tests/scratch.test.ts').write_text('untracked failing test')
+        self.mutant = dict(file='compiler/context.ts', start=0, end=8, before='original', after='mutated', kind='test', line=1, id='example')
+        self.mutations = [self.mutant]
+        self.calls = []
+        self.copies = []
+        self.focused = ['focused assertion']
+        self.full = ['first assertion', 'different assertion']
+        self.baseline_failure = None
+        self.require_copied_generator = False
+        self.malformed_output = None
+        self.timeout_at = None
+        self.output = io.StringIO()
+        temporary_directory = tempfile.TemporaryDirectory
 
-        def invoke(command, **kwargs):
-            assert kwargs['timeout'] > 0
-            assert kwargs['env']['NO_COLOR'] == '1'
-            assert 'FORCE_COLOR' not in kwargs['env']
-            if command == ['git', 'ls-files', '-z', '--', 'compiler', 'tests', 'differential']:
-                return subprocess.CompletedProcess(command, 0, ('\0'.join(tracked_inputs) + '\0').encode(), b'')
-            if command == ['bun', '--version']:
-                return subprocess.CompletedProcess(command, 0, b'test-bun\n', b'')
-            if command == ['bun', 'tests/support/generate-mutants.ts']:
-                return subprocess.CompletedProcess(command, 0, json.dumps([mutation]), '')
-            assert command[:3] == ['bun', 'test', '--bail']
-            assert command[3:5] == ['--preload', './tests/support/mutation-budget.ts']
-            target = kwargs['cwd']
-            assert target != fixture
-            assert not (target / 'tests/scratch.test.ts').exists(), 'untracked tests must not run'
-            assert source.read_text().startswith('original')
-            contents = (target / mutation['file']).read_text()
-            calls.append(contents)
-            if contents.startswith('mutated') and edit_during_run:
-                (fixture / edit_during_run.pop()).write_text('edited during campaign')
-            killed = contents.startswith('mutated') and (not full_suite or len(command) == 5)
-            label = full_suite if isinstance(full_suite, str) else 'tests/example.test.ts'
-            return subprocess.CompletedProcess(command, int(killed), '', label + ':\n(fail) ' + killing_test[0] + ' [1.23ms]\n' if killed else '')
-
-        with patch.object(driver, 'ROOT', fixture), patch.object(driver, 'REPORT', report), patch.object(sys, 'argv', ['tests/mutate-context.py']), patch.object(driver.subprocess, 'run', side_effect=invoke):
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                driver.run()
-            assert 'compiler/context.ts:1 test: killed: G-43: named assertion' in output.getvalue()
-            assert 'example: killed:' not in output.getvalue()
-            assert '| killed |' in report.read_text()
-            assert 'G-43: named assertion' not in report.read_text()
-            if full_suite:
-                assert '1 fallback kills confirmed' in report.read_text()
-                assert calls.count('mutated') == 3
-            assert '[1.23ms]' not in report.read_text()
-            assert report.read_text().count(driver.HASH_LINE) == 1
-            for failure, message in [
-                (FileNotFoundError('git'), 'requires git on PATH'),
-                (subprocess.CalledProcessError(128, ['git'], stderr=b'not a repository'), 'git ls-files failed: not a repository'),
-                (subprocess.TimeoutExpired(['git'], 10), 'git ls-files timeout after 10 seconds'),
-            ]:
-                with patch.object(driver.subprocess, 'run', side_effect=failure):
-                    try:
-                        driver.copy_inputs(fixture)
-                        raise AssertionError('git failure must stop with a driver message')
-                    except SystemExit as error:
-                        assert message in str(error), str(error)
-            for listed, message in [(b'', 'git ls-files returned no files'), (b'tests/gone.test.ts\0', 'cannot copy tracked input tests/gone.test.ts')]:
-                with patch.object(driver.subprocess, 'run', return_value=subprocess.CompletedProcess(['git'], 0, listed, b'')):
-                    try:
-                        driver.copy_inputs(fixture / 'failed-copy')
-                        raise AssertionError('invalid input list must stop')
-                    except SystemExit as error:
-                        assert message in str(error), str(error)
-            # Package metadata does not affect the mutation inputs or copied suite.
-            first = len(calls)
-            (fixture / 'package.json').write_text('{"version": "next"}')
-            driver.run()
-            assert len(calls) == first, 'a version bump must preserve the inventory'
-            # A save/restore around copying must hash the bytes the suite actually saw.
-            copyfile = driver.shutil.copyfile
-            def save_during_copy(source_path, destination):
-                if source_path == fixture / 'tests/example.test.ts':
-                    source_path.write_text('weaker copied test')
-                    try:
-                        return copyfile(source_path, destination)
-                    finally:
-                        source_path.write_text('input')
-                return copyfile(source_path, destination)
-
-            with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']), patch.object(driver.shutil, 'copyfile', side_effect=save_during_copy):
-                driver.run()
-            first = len(calls)
-            driver.run()
-            assert len(calls) > first, 'hash must describe the copied test, not the restored source'
-            # An edit after the copy must invalidate the next plain run.
-            for name in ['tests/example.test.ts', 'compiler/url.ts']:
-                edit_during_run.append(name)
-                with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']):
-                    driver.run()
-                first = len(calls)
-                driver.run()
-                assert len(calls) > first, f'edit during campaign was incorrectly covered: {name}'
-            # Untracked editor/cache files have no effect.
-            (fixture / 'tests/untracked.txt').write_text('ignored by fingerprint')
-            first = len(calls)
-            driver.run()
-            assert len(calls) == first, 'unchanged inputs must reuse the run'
-            for name in ['compiler/context.ts', 'tests/example.test.ts', 'tests/fixture.txt', 'tests/support/generate-mutants.ts', 'tests/support/mutation-equivalents.json', 'tsconfig.json', 'tsconfig.typecheck.json', 'check.sh', 'differential/RESULT.json']:
-                file = fixture / name
-                # Whitespace changes preserve the fixture mutant and valid JSON.
-                file.write_text(file.read_text() + '\n')
-                driver.run()
-                assert len(calls) > first, name
-                first = len(calls)
-                assert source.read_text().startswith('original')
-                if name == 'compiler/context.ts':
-                    source.write_text('original')
-            lines = report.read_text().splitlines()
-            report.write_text(lines[-1] + '\n')
-            driver.run()
-            assert len(calls) > first, 'removing inventory rows must invalidate the cache'
-            first = len(calls)
-            with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']):
-                before = report.read_text()
-                killing_test[0] = 'another killing test'
-                driver.run()
-                assert len(calls) > first
-                assert report.read_text() == before, 'killing test order must not change the inventory'
-            before = report.read_text()
-            with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']), patch.object(driver.subprocess, 'run', side_effect=lambda command, **kw: invoke(command, **kw) if command[1] != 'test' else (_ for _ in ()).throw(subprocess.TimeoutExpired(command, 15))):
+        @contextlib.contextmanager
+        def checked_copy(**kwargs):
+            with temporary_directory(**kwargs) as directory:
                 try:
-                    driver.run()
-                    raise AssertionError('timeout must fail')
-                except subprocess.TimeoutExpired:
-                    pass
-            assert source.read_text().startswith('original')
-            assert report.read_text() == before
+                    yield directory
+                finally:
+                    copied_source = Path(directory) / 'compiler/context.ts'
+                    if copied_source.exists():
+                        self.assertEqual(copied_source.read_text(), 'original', 'mutant was not restored')
 
-            # A transient full-suite timing kill must not become a reusable result.
-            if full_suite:
-                full_calls = []
+        for replacement in [patch.object(driver, 'ROOT', self.fixture), patch.object(sys, 'argv', ['tests/mutate-context.py']),
+                            patch.object(driver.subprocess, 'run', side_effect=self.invoke),
+                            patch.object(driver.tempfile, 'TemporaryDirectory', checked_copy), contextlib.redirect_stdout(self.output)]:
+            replacement.__enter__()
+            self.addCleanup(replacement.__exit__, None, None, None)
 
-                def transient(command, **kwargs):
-                    result = invoke(command, **kwargs)
-                    if command[:2] == ['bun', 'test'] and len(command) == 5:
-                        full_calls.append(command)
-                        if len(full_calls) == 2:
-                            return subprocess.CompletedProcess(command, 0, '', '')
-                    return result
+    def invoke(self, command, **kwargs):
+        assert kwargs['timeout'] > 0
+        assert kwargs['env']['NO_COLOR'] == '1' and 'FORCE_COLOR' not in kwargs['env']
+        target = kwargs.get('cwd')
+        if command == ['git', 'ls-files', '-z', '--', 'compiler', 'tests', 'differential']:
+            return subprocess.CompletedProcess(command, 0, ('\0'.join(self.tracked) + '\0').encode(), b'')
+        if command == ['bun', '--version']:
+            return subprocess.CompletedProcess(command, 0, 'test-bun\n' if kwargs.get('text') else b'test-bun\n', '')
+        if command == ['bun', 'tests/support/generate-mutants.ts']:
+            if self.require_copied_generator:
+                assert target != self.fixture, 'generate mutants inside the execution copy'
+                assert (target / 'node_modules').resolve() == self.fixture / 'node_modules'
+                assert (target / 'tests/support/generate-mutants.ts').read_text() == 'input'
+            return subprocess.CompletedProcess(command, 0, json.dumps(self.mutations), '')
+        assert command[:5] == ['bun', 'test', '--bail', '--preload', './tests/support/mutation-budget.ts']
+        assert target != self.fixture and self.source.read_text() == 'original'
+        assert not (target / 'tests/scratch.test.ts').exists(), 'untracked tests must not run'
+        for name in self.tracked:
+            assert (target / name).is_file(), f'tracked input missing: {name}'
+        self.copies.append(target)
+        full = len(command) == 5
+        if not full:
+            assert command[5:7] == ['--test-name-pattern', '^(?!G-29:)']
+        mutated = (target / self.mutant['file']).read_text() == 'mutated'
+        stage = ('mutant' if mutated else 'baseline') + (' full' if full else ' focused')
+        self.calls.append(stage)
+        if stage == self.timeout_at:
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+        if mutated and self.malformed_output is not None:
+            code, output = self.malformed_output
+            return subprocess.CompletedProcess(command, code, '', output)
+        labels = self.full if full else self.focused
+        label = labels.pop(0) if mutated and labels else self.baseline_failure if not mutated and full else None
+        output = f'(fail) {label} [1.23ms]\n' if label else ' 1 pass\n 0 fail\n'
+        return subprocess.CompletedProcess(command, int(bool(label)), '', output)
 
-                with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']), patch.object(driver.subprocess, 'run', side_effect=transient):
-                    try:
-                        driver.run()
-                        raise AssertionError('a transient fallback kill must abort')
-                    except RuntimeError as error:
-                        assert 'not confirmed' in str(error)
-                assert report.read_text() == before
-                assert source.read_text() == 'original'
+    def campaign_fails(self, message):
+        with self.assertRaises((SystemExit, RuntimeError, AssertionError, subprocess.TimeoutExpired)) as caught:
+            driver.run()
+        self.assertIn(message, str(caught.exception))
+        self.assertEqual(self.source.read_text(), 'original')
+        self.assertTrue(all(not target.exists() for target in self.copies), 'failed campaign left a copy')
+        return caught.exception
 
-            # The old report remains visible until the complete replacement is renamed.
-            original_replace = Path.replace
+    def test_generates_inside_copy(self):
+        self.require_copied_generator = True
+        driver.run()
 
-            def replace(path, destination):
-                assert report.read_text() == before
-                assert path.parent == report.parent and path != report
-                assert driver.HASH_LINE in path.read_text()
-                return original_replace(path, destination)
+    def test_always_fresh_and_reports_each_outcome(self):
+        self.mutations += [dict(self.mutant, id='reviewed', kind='equivalent test')]
+        self.equivalents.write_text(json.dumps({'reviewed': 'Reviewed fixture equivalence'}))
+        for _ in range(2):
+            self.focused = ['named assertion']
+            driver.run()
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full', 'mutant focused', 'mutant focused'] * 2)
+        output = self.output.getvalue()
+        self.assertEqual(output.count('compiler/context.ts:1 test: killed: named assertion'), 2)
+        self.assertEqual(output.count('compiler/context.ts:1 equivalent test: equivalent: Reviewed fixture equivalence'), 2)
+        self.assertEqual(output.count('2 generated; 1 killed; 1 equivalent; 0 unreviewed survivors.'), 2)
+        self.assertEqual(output.count('Bun test-bun'), 2)
+        self.assertTrue(all(not target.exists() for target in self.copies))
 
-            with patch.object(sys, 'argv', ['tests/mutate-context.py', '--force']), patch.object(Path, 'replace', replace):
-                driver.run()
-            assert not list(report.parent.glob('.MUTATIONS-*'))
-            with patch.object(Path, 'replace', side_effect=OSError('rename failed')):
-                try:
-                    driver.write_report('incomplete replacement')
-                    raise AssertionError('rename failure must propagate')
-                except OSError:
-                    pass
-            assert report.read_text() == before
-            assert not list(report.parent.glob('.MUTATIONS-*'))
+    def test_different_fallback_failures_confirm_a_kill(self):
+        self.focused = []
+        driver.run()
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full', 'mutant focused', 'mutant full', 'mutant full'])
+        self.assertIn('1 generated; 1 killed; 0 equivalent; 0 unreviewed survivors.', self.output.getvalue())
+        self.assertIn('1 fallback kills confirmed', self.output.getvalue())
 
-            def survive(command, **kwargs):
-                result = invoke(command, **kwargs)
-                if command[1] == 'test':
-                    return subprocess.CompletedProcess(command, 0, '', '')
-                return result
+    def test_passing_confirmation_is_inconclusive(self):
+        self.focused = []
+        self.full = ['transient failure']
+        self.campaign_fails('not confirmed')
+        self.assertNotIn(': killed:', self.output.getvalue())
 
-            for arguments in [['tests/mutate-context.py', '--force'], ['tests/mutate-context.py']]:
-                with patch.object(sys, 'argv', arguments), patch.object(driver.subprocess, 'run', side_effect=survive):
-                    try:
-                        driver.run()
-                        raise AssertionError('survivors must fail without a reusable fingerprint')
-                    except SystemExit as error:
-                        assert 'Unreviewed survivors' in str(error)
-                assert driver.HASH_LINE not in report.read_text()
-                assert source.read_text() == 'original'
-subprocess.run([sys.executable, 'tests/support/check-mutation-signals.py'], cwd=root, check=True, timeout=20)
-print('G-43: copy isolation, cache invalidation, --bail, loop budget and kill reporting passed; report rows, all test files, repeated kills, atomic rename and SIGTERM checked')
+    def test_full_baseline_failure_precedes_any_outcome(self):
+        self.baseline_failure = 'unmutated full-suite failure'
+        self.campaign_fails('baseline')
+        self.assertEqual(self.calls, ['baseline focused', 'baseline full'])
+        self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_focused_baseline_failure_precedes_any_outcome(self):
+        invoke = self.invoke
+
+        def fail_focused(command, **kwargs):
+            result = invoke(command, **kwargs)
+            if self.calls == ['baseline focused']:
+                return subprocess.CompletedProcess(command, 1, '', '(fail) broken baseline\n')
+            return result
+
+        with patch.object(driver.subprocess, 'run', side_effect=fail_focused):
+            self.campaign_fails('baseline')
+        self.assertEqual(self.calls, ['baseline focused'])
+
+    def test_unreviewed_survivor_fails_after_complete_campaign(self):
+        self.focused = self.full = []
+        self.campaign_fails('Unreviewed survivors')
+        self.assertIn('compiler/context.ts:1 test: SURVIVED', self.output.getvalue())
+        self.assertIn('1 generated; 0 killed; 0 equivalent; 1 unreviewed survivors.', self.output.getvalue())
+
+    def test_mutant_timeout_is_never_a_kill(self):
+        for stage in ['mutant focused', 'mutant full']:
+            with self.subTest(stage=stage):
+                self.timeout_at = stage
+                self.focused = []
+                error = self.campaign_fails('')
+                self.assertRegex(str(error), 'timeout|timed out')
+                self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_baseline_timeout_is_never_a_kill(self):
+        for stage in ['baseline focused', 'baseline full']:
+            with self.subTest(stage=stage):
+                self.timeout_at = stage
+                error = self.campaign_fails('')
+                self.assertRegex(str(error), 'timeout|timed out')
+                self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_malformed_test_output_has_no_outcome(self):
+        for result in [(1, 'infrastructure failed'), (0, ''), (0, '0 pass\n0 fail\n'),
+                       (0, '(fail) inconsistent status\n'), (-9, '(fail) killed process\n')]:
+            with self.subTest(result=result):
+                self.malformed_output = result
+                self.campaign_fails('test output')
+                self.assertNotIn(': killed:', self.output.getvalue())
+
+    def test_invalid_or_empty_mutant_list_fails_before_tests(self):
+        for mutations in [[], {}, [None], [dict(self.mutant, start=-1)], [dict(self.mutant, end=99)],
+                          [dict(self.mutant, before='wrong')], [dict(self.mutant, after='original')],
+                          [dict(self.mutant, file='../outside.ts')], [dict(self.mutant, line=0)],
+                          [dict(self.mutant, start=True)], [dict(self.mutant, id='')], [self.mutant, self.mutant]]:
+            with self.subTest(mutations=mutations):
+                self.mutations = mutations
+                self.campaign_fails('mutant list')
+                self.assertEqual(self.calls, [])
+
+    def test_malformed_generation_and_missing_bun_fail(self):
+        invoke = self.invoke
+        for fault in ['bad json', 'failed generator', 'missing bun']:
+            with self.subTest(fault=fault):
+                def broken(command, **kwargs):
+                    if command == ['bun', 'tests/support/generate-mutants.ts']:
+                        if fault == 'missing bun':
+                            raise FileNotFoundError('bun')
+                        return subprocess.CompletedProcess(command, int(fault == 'failed generator'), 'not json', 'generator error')
+                    return invoke(command, **kwargs)
+                with patch.object(driver.subprocess, 'run', side_effect=broken):
+                    self.campaign_fails('bun' if fault == 'missing bun' else 'generat' if fault == 'failed generator' else 'mutant list')
+                self.assertEqual(self.calls, [])
+
+    def test_stale_and_obsolete_equivalences_fail(self):
+        self.equivalents.write_text('{"missing": "Stale review"}')
+        self.campaign_fails('Stale equivalence')
+        self.assertEqual(self.calls, [])
+        self.equivalents.write_text('{"example": "Obsolete review"}')
+        self.campaign_fails('Obsolete equivalence')
+
+    def test_invalid_equivalences_fail(self):
+        for entries in ['[]', '{"example": ""}', '{"example": null}', 'not json']:
+            with self.subTest(entries=entries):
+                self.equivalents.write_text(entries)
+                self.campaign_fails('equivalence')
+                self.assertEqual(self.calls, [])
+
+    def test_git_and_copy_failures_have_clear_messages(self):
+        for failure, message in [
+            (FileNotFoundError('git'), 'requires git on PATH'),
+            (subprocess.CalledProcessError(128, ['git'], stderr=b'not a repository'), 'git ls-files failed: not a repository'),
+            (subprocess.TimeoutExpired(['git'], 10), 'git ls-files timeout after 10 seconds'),
+        ]:
+            with patch.object(driver.subprocess, 'run', side_effect=failure):
+                with self.assertRaises(SystemExit) as caught:
+                    driver.copy_inputs(self.fixture / 'failed-copy')
+                self.assertIn(message, str(caught.exception))
+        for listed, message in [(b'', 'git ls-files returned no files'), (b'tests/gone.test.ts\0', 'cannot copy tracked input tests/gone.test.ts')]:
+            with patch.object(driver.subprocess, 'run', return_value=subprocess.CompletedProcess(['git'], 0, listed, b'')):
+                with self.assertRaises(SystemExit) as caught:
+                    driver.copy_inputs(self.fixture / 'failed-copy')
+                self.assertIn(message, str(caught.exception))
+
+    def test_arguments_are_rejected(self):
+        for arguments in [['--force'], ['--unknown'], ['extra']]:
+            with self.subTest(arguments=arguments), patch.object(sys, 'argv', ['tests/mutate-context.py', *arguments]):
+                self.campaign_fails('usage: python3 tests/mutate-context.py')
+                self.assertEqual(self.calls, [])
+
+
+if __name__ == '__main__':
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(CampaignTests)
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    if not result.wasSuccessful():
+        raise SystemExit(1)
+    subprocess.run([sys.executable, 'tests/support/check-mutation-signals.py'], cwd=root, check=True, timeout=20)
+    print('G-43: fresh campaigns, copy isolation, baselines, --bail, loop budget and kill reporting passed')
