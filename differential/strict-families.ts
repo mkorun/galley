@@ -1,3 +1,4 @@
+import { runChromium } from './chromium.js'
 import galley, { GalleyDiagnosticError, parse } from '../index.js'
 import type { TemplateNode } from '../compiler/ast.js'
 import { readContexts } from '../compiler/context.js'
@@ -110,14 +111,13 @@ export const strictFamilies = async (full: boolean) => {
 		catch (error) { refusal(error); textRefused++ }
 	}
 	for (const result of await observeStrict(textCases)) if (!result.text) failures.push({ id: result.id, detail: 'accepted text owner did not hold probe as text' })
-	const version = Bun.spawnSync(['chromium', '--version'], { timeout: 10000, stdout: 'pipe', stderr: 'pipe' })
-	if (version.exitCode !== 0) throw new Error('Cannot read Chromium version')
+	const version = runChromium(['--version'], 10000)
 	return { mode: full ? 'full' : 'smoke', browser: new TextDecoder().decode(version.stdout).trim(), inputDigest: digest.update('').digest('hex'), random: randomReports, foreign: { alphabet: FOREIGN_PIECES.length, depth: full ? 4 : 2, cases: foreignCases, browserForeignAmongAccepted: browserForeign, refused, noForeignEntry, observed: foreignObserved }, text: { names: names.length, owners: TEXT_OWNERS.length, pairs: textPairs, refused: textRefused, observed: textCases.length }, failures }
 }
 
 /** Pin the committed productions and browser/placement oracle before starting the extended campaign. */
 export const strictSourceDigest = async (): Promise<string> => {
 	const digest = new Bun.CryptoHasher('sha256')
-	for (const file of ['random.ts', 'strict-families.ts', 'strict-browser.ts']) digest.update(await Bun.file(new URL(file, import.meta.url)).text())
+	for (const file of ['random.ts', 'strict-families.ts', 'strict-browser.ts', 'chromium.ts']) digest.update(await Bun.file(new URL(file, import.meta.url)).text())
 	return digest.update('').digest('hex')
 }

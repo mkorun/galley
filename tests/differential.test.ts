@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { runChromium } from '../differential/chromium.js'
 import { expect, test } from 'bun:test'
 import { encode, decode, extend, generate, random, SEED, type Fixture } from '../differential/model.js'
 import { forbidden, nearMiss, replay, violations, type Violation } from '../differential/oracle.js'
@@ -69,11 +73,17 @@ test('browser transport rejects absent/malformed observations and safely quotes 
 })
 
 test('required Chromium differential and committed corpus replay', async () => {
+	const recorded = Bun.file(new URL('../differential/RESULT.json', import.meta.url))
+	const before = await recorded.text()
 	const argv = process.argv
 	process.argv = [argv[0]!, 'differential/run.ts']
-	try { await import('../differential/run.ts') }
+	let result
+	try { result = (await import('../differential/run.js')).report }
 	finally { process.argv = argv }
-	const result = await Bun.file(new URL('../differential/RESULT.json', import.meta.url)).json()
+	expect(await recorded.text()).toBe(before)
+	const { browser: recordedBrowser, ...expected } = JSON.parse(before)
+	const { browser: freshBrowser, ...actual } = result
+	expect(actual).toEqual(expected)
 	expect(result.failures).toEqual([])
 	expect(result.cases).toBe(1002)
 	expect([result.boundary, result.snippet, result.foreign, result.numeric]).toEqual([168, 120, 120, 0])
@@ -140,11 +150,14 @@ test('oracle visits only HTML template contents in a foreign-content batch', asy
 		'<math><template><a href="GALLEY_SLOT"></a></template></math>',
 		'<template><template><a href="GALLEY_SLOT"></a></template></template>',
 	]
-	const path = '/tmp/galley-oracle-template-regression.html'
-	await Bun.write(path, browserPage(html.map(value => fixture({ html: value }))))
-	const child = Bun.spawnSync(['chromium', '--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], { timeout: 10000, stdout: 'pipe', stderr: 'pipe' })
-	expect(child.exitCode).toBe(0)
-	expect(readBrowserOutput(new TextDecoder().decode(child.stdout))).toEqual(html.map(() => ({ decoded: ['/x'], slots: ['href'] })))
+	const directory = await mkdtemp(join(tmpdir(), 'galley-oracle-template-'))
+	try {
+		const path = join(directory, 'page.html')
+		await Bun.write(path, browserPage(html.map(value => fixture({ html: value }))))
+		const child = runChromium(['--headless', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], 10000)
+		expect(child.exitCode).toBe(0)
+		expect(readBrowserOutput(new TextDecoder().decode(child.stdout))).toEqual(html.map(() => ({ decoded: ['/x'], slots: ['href'] })))
+	} finally { await rm(directory, { recursive: true, force: true }) }
 }, 15000)
 
 test('strict random alphabets are pinned, bounded, and reject unknown inputs', async () => {

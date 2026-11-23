@@ -26,4 +26,8 @@ assert any(m['kind'] == 'drop returned value' for m in original)
 assert any(m['kind'] == 'drop generated declaration ,$$indent=0' for m in original)
 assert any(m['file'] == 'compiler/lint.ts' for m in original)
 assert any(m['file'] == 'compiler/index.ts' and 'lint' in json.loads(m['id'])[1] for m in original)
+for statement in ['scope.add(name);', 'localNames.push(name)', 'declare(name)', 'declare(node.name);', 'bindings.push(node.index)', 'scope.delete(name)']:
+    assert any(m['file'] == 'compiler/codegen.ts' and statement in m['before'] for m in original), statement
+for statement in ['newline = nextNewline;', "nextNewline = text.indexOf('\\n', newline + 1)", 'lineStart = newline + 1', 'lineIsWhitespace &&']:
+    assert any(m['file'] == 'compiler/lexer.ts' and statement in m['before'] for m in original), statement
 print(f'{len(original)} stable keys; push, assignment, return, snippet state and lint mutations present')

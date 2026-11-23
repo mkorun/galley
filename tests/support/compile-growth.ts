@@ -1,14 +1,14 @@
-/** Median wall-clock ratios include every compiler operation, including unnamed native work. */
+/** Minimum wall-clock ratios reduce scheduler noise while including unnamed native work. */
 import { shapes } from './compile-shapes.js'
 export const GROWTH_LIMIT = 32
-export const measureGrowth = async (names = Object.keys(shapes), runs = 5) => {
+export const measureGrowth = async (names = Object.keys(shapes)) => {
 	const rows = []
 	for (const name of names) {
 		const shape = shapes[name]
 		if (!shape) throw new Error(`Unknown shape ${name}`)
 		const sizes = [shape.n * 4, shape.n * 64]
 		const samples: number[][] = [[], []], bytes: number[] = []
-		for (let run = 0; run < runs; run++) {
+		for (let run = 0; run < 5; run++) {
 			// Alternate size order; every observation gets its own process and compiler.
 			for (const index of run % 2 ? [1, 0] : [0, 1]) {
 				const child = Bun.spawn(['bun', new URL('./compile-time.ts', import.meta.url).pathname, name, String(sizes[index])], { stdout: 'pipe', stderr: 'pipe', timeout: 60000 })
@@ -19,8 +19,8 @@ export const measureGrowth = async (names = Object.keys(shapes), runs = 5) => {
 				samples[index]!.push(result.ms); bytes[index] = result.bytes
 			}
 		}
-		const medians = samples.map(values => [...values].sort((a,b) => a-b)[runs >> 1]!)
-		rows.push({ name, sizes, repetitions: shape.repetitions ?? 1, bytes, samples, smallMs: medians[0]!, largeMs: medians[1]!, ratio: medians[1]! / medians[0]! })
+		const minima = samples.map(values => Math.min(...values))
+		rows.push({ name, sizes, repetitions: shape.repetitions ?? 1, bytes, samples, smallMs: minima[0]!, largeMs: minima[1]!, ratio: minima[1]! / minima[0]! })
 	}
 	return rows
 }

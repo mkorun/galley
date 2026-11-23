@@ -1,3 +1,4 @@
+import { runChromium } from './chromium.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,9 +45,8 @@ export const observeStrict = async (cases: readonly BrowserCase[], batch = 1000)
 	const run = async (items: readonly BrowserCase[]): Promise<BrowserReading[]> => {
 		const path = join(directory, 'page.html')
 		await Bun.write(path, strictPage(items))
-		const child = Bun.spawnSync(['chromium', '--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], { timeout: 55000, stdout: 'pipe', stderr: 'pipe' })
 		try {
-			if (child.exitCode !== 0) throw new Error('Chromium failed')
+			const child = runChromium(['--headless', '--renderer-process-limit=1', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--dump-dom', `file://${path}`], 55000)
 			return readStrictOutput(new TextDecoder().decode(child.stdout), items)
 		} catch (error) {
 			// Diagnose a browser failure by case, never silently drop the batch.

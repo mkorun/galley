@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import galley, { lint } from '../index.js'
+import galley, { GalleyDiagnosticError, lint } from '../index.js'
 
 test('G-40: lint visits filter arguments and declaration expressions', async () => {
 	for (const source of [
@@ -37,4 +37,14 @@ test('G-40: reserved names diagnose declarations and partial declarations share 
 	expect((await lint('{@render String()}')).map(d => d.code)).toEqual(['G3005'])
 	const options = { includes: { import: async () => '{#snippet s()}inner{/snippet}{@render s()}' } }
 	expect((await lint('{#snippet s()}outer{/snippet}{@partial p.sort}', options)).map(d => d.code)).toEqual(['G3003'])
+})
+
+test('lint and compile report the same G3014 message after stripping trailing whitespace', async () => {
+	const source = '<p>a < b</p> '
+	const diagnostics = await lint(source, { strip: true })
+	expect(diagnostics.map(item => item.code)).toEqual(['G3014'])
+	const error = await galley(source, { strip: true }).then(() => undefined, error => error)
+	expect(error).toBeInstanceOf(GalleyDiagnosticError)
+	expect(error.diagnostic.code).toBe('G3014')
+	expect(diagnostics[0]!.message).toBe(error.diagnostic.message)
 })

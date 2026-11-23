@@ -26,10 +26,11 @@ for (const file of ['compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.
 	const flip = (node: ts.Node) => change(node, `!(${node.getText(ast)})`, 'predicate')
 	// URL checkpoint generation: liveness, writes, literal feeds, attribute ends and snippet checkpoints.
 	const regions = file.endsWith('codegen.ts') ? [
-		[source.indexOf('const live ='), source.indexOf('const emitNodes =')],
-		[source.indexOf('written(node.slot, value, true'), source.indexOf(')}${buffer}', source.indexOf('written(node.slot, value, true')) + 1],
-		[source.indexOf("case 'snippet':", source.indexOf('const emitNodes =')), source.indexOf("case 'partial':")],
-	] : file.endsWith('lexer.ts') ? [[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')]] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : [[0, source.length]]
+		[source.indexOf('const live ='), source.indexOf("// '$' is seeded")],
+	] : file.endsWith('lexer.ts') ? [
+		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
+		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
+	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : [[0, source.length]]
 	if (regions.some(([a,b]) => a! < 0 || b! <= a!)) throw new Error(`Unknown checkpoint region in ${file}`)
 	const visit = (node: ts.Node) => {
 		if (!regions.some(([a,b]) => node.getStart(ast) >= a! && node.end <= b!)) { ts.forEachChild(node, visit); return }
