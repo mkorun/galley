@@ -46,7 +46,7 @@ export const generate = (ast, options = {}) => {
         if (node.kind === 'if')
             return node.branches.some(branch => hasMetadata(branch.children));
         if (node.kind === 'each')
-            return hasMetadata(node.children);
+            return hasMetadata(node.children) || hasMetadata(node.fallback ?? []);
         if (node.kind === 'snippet')
             return node.variants?.some(variant => hasMetadata(variant.children)) === true;
         return false;
@@ -174,11 +174,11 @@ export const generate = (ast, options = {}) => {
                     break;
                 }
                 case 'each': {
-                    const id = ++sequence, collection = `$$l${id}`, array = `$$a${id}`, count = `$$c${id}`;
+                    const id = ++sequence, collection = `$$l${id}`, array = `$$a${id}`, count = `$$c${id}`, empty = `$$e${id}`;
                     const metadata = node.metadata ?? new Set();
                     const needsCount = metadata.size > 0;
                     const needsCounter = metadata.has('isFirst') || metadata.has('isLast');
-                    body += `{const ${collection}=${pathCode(node.collection, scope)};if(${collection}){const ${array}=Array.isArray(${collection});`;
+                    body += `{const ${collection}=${pathCode(node.collection, scope)};${node.fallback ? `let ${empty}=true;` : ''}if(${collection}){const ${array}=Array.isArray(${collection});`;
                     if (needsCount)
                         body += `const ${count}=${array}?${collection}.length:Object.keys(${collection}).length;`;
                     const bindings = [node.item, ...metadata];
@@ -190,6 +190,8 @@ export const generate = (ast, options = {}) => {
                         body += `for(const [${node.index},${node.item}] of ${array}?${collection}.entries():Object.entries(${collection})){`;
                     else
                         body += `for(const ${node.item} of (${array}?${collection}:Object.values(${collection}))){`;
+                    if (node.fallback)
+                        body += `${empty}=false;`;
                     if (metadata.has('length'))
                         body += `const length=${count};`;
                     if (metadata.has('isFirst'))
@@ -197,7 +199,14 @@ export const generate = (ast, options = {}) => {
                     if (metadata.has('isLast'))
                         body += `const isLast=$$n${id}===${count}-1;`;
                     emitNodes(node.children, scope, buffer, bindings);
-                    body += `${needsCounter ? `$$n${id}++;` : ''}}}}`;
+                    body += `${needsCounter ? `$$n${id}++;` : ''}}}`;
+                    // The one rule: the fallback renders when the body ran zero times, whatever the collection was.
+                    if (node.fallback) {
+                        body += `if(${empty}){`;
+                        emitNodes(node.fallback, scope, buffer);
+                        body += '}'; // fallback branch
+                    }
+                    body += '}'; // collection scope
                     break;
                 }
                 case 'snippet': {

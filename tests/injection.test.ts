@@ -111,12 +111,13 @@ describe('comparison RHS rejects code injection disguised as a string literal', 
 
 })
 
-describe('special path roots remain data keys, never generated JavaScript', () => {
+describe('special data keys require a root path and never become generated JavaScript', () => {
 	test('plus payload cannot reach a JavaScript global from ordinary output', async () => {
 		process.env.GALLEY_INJECTION_SECRET = 'TOP-SECRET'
 		try {
-			expect(await render('{ a+process.env.GALLEY_INJECTION_SECRET }', {})).toBe('')
-			expect(await render('{ a+process.env.GALLEY_INJECTION_SECRET }', {
+			await expect(render('{ a+process.env.GALLEY_INJECTION_SECRET }', {})).rejects.toThrow('G3019')
+			expect(await render('{ $.a+process.env.GALLEY_INJECTION_SECRET }', {})).toBe('')
+			expect(await render('{ $.a+process.env.GALLEY_INJECTION_SECRET }', {
 				'a+process': { env: { GALLEY_INJECTION_SECRET: 'data-only' } },
 			})).toBe('data-only')
 		} finally {
@@ -127,18 +128,19 @@ describe('special path roots remain data keys, never generated JavaScript', () =
 	test('special roots are safe in const, if, each and pipe arguments', async () => {
 		process.env.GALLEY_INJECTION_SECRET = 'TOP-SECRET'
 		try {
-			expect(await render('{@const x = a+process.env.GALLEY_INJECTION_SECRET}{x}', {})).toBe('')
-			expect(await render('{#if a+process.env.GALLEY_INJECTION_SECRET}yes{/if}', {})).toBe('')
-			expect(await render('{#each a+process.env as value}{value}{/each}', {})).toBe('')
-			expect(await render('{ value | truncate(a+process.env.LIMIT) }', { value: 'abcdef' })).toBe('abcdef')
+			expect(await render('{@const x = $.a+process.env.GALLEY_INJECTION_SECRET}{x}', {})).toBe('')
+			expect(await render('{#if $.a+process.env.GALLEY_INJECTION_SECRET}yes{/if}', {})).toBe('')
+			expect(await render('{#each $.a+process.env as value}{value}{/each}', {})).toBe('')
+			expect(await render('{ value | truncate($.a+process.env.LIMIT) }', { value: 'abcdef' })).toBe('abcdef')
 		} finally {
 			delete process.env.GALLEY_INJECTION_SECRET
 		}
 	})
 
 	test('colon root uses safe key access and lint remains side-effect free', async () => {
-		expect(await render('{og:title}', { 'og:title': 'Open Graph' })).toBe('Open Graph')
-		expect(await lint('{a+process.env.SECRET}')).toEqual([])
+		expect(await render('{$.og:title}', { 'og:title': 'Open Graph' })).toBe('Open Graph')
+		expect((await lint('{a+process.env.SECRET}')).map(item => item.code)).toEqual(['G3019'])
+		expect(await lint('{$.a+process.env.SECRET}')).toEqual([])
 	})
 
 	test('bare "$" root addresses the context object, not a JavaScript binding, and does not reopen injection', async () => {

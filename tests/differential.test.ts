@@ -197,7 +197,7 @@ test('strict browser transport and placement oracle reject broken observations a
 	const wrap = (value: unknown) => '<pre id="result">' + btoa(JSON.stringify(value)) + '</pre>'
 	expect(() => readStrictOutput('', cases)).toThrow('no strict observations')
 	for (const value of [null, [], [null], [{ id: 'a', places: [1], foreign: false, text: false }]]) expect(() => readStrictOutput(wrap(value), cases)).toThrow('Malformed strict observations')
-	expect(readStrictOutput(wrap([{ id: 'a', places: [], urls: ['/x'], foreign: false, text: false }]), cases)).toHaveLength(1)
+	expect(readStrictOutput(wrap([{ id: 'a', places: [], urls: ['/x'], lists: [], foreign: false, text: false }]), cases)).toHaveLength(1)
 	expect(placementFailures(['1|attr:a.href', '1|name', '1|tag', '1|comment', '1|text:title'], new Set(['text:title']))).toHaveLength(4)
 	expect(placementFailures(['1|text:p'], new Set(['text']))).toEqual([])
 	const browser = spyOn(Bun, 'spawnSync').mockImplementation(() => ({ exitCode: 1, stdout: new Uint8Array(), stderr: new Uint8Array() }) as any)
@@ -222,7 +222,7 @@ test('strict family oracle detects planted name, text-owner and foreign-count di
 	const browser = await import('../differential/strict-browser.js')
 	const { strictFamilies } = await import('../differential/strict-families.js')
 	const { spyOn } = await import('bun:test')
-	const observe = spyOn(browser, 'observeStrict').mockImplementation(async cases => cases.map(item => ({ id: item.id, places: ['1|tag'], urls: ['javascript:x'], foreign: true, text: false })))
+	const observe = spyOn(browser, 'observeStrict').mockImplementation(async cases => cases.map(item => ({ id: item.id, places: ['1|tag'], urls: ['javascript:x'], lists: [], foreign: true, text: false })))
 	try {
 		const report = await strictFamilies(false)
 		expect(report.failures.some(item => item.detail === '1|tag')).toBe(true)
@@ -256,4 +256,16 @@ test('G-31: placement oracle folds foreignObject and checks plain text parents',
 	}
 	const [reading] = await observeStrict([{ id: 'G-31-foreignObject', html: '<svg><foreignObject>GALLEY_TEXT&lt;i data-galley-probe&gt;</foreignObject></svg>', kind: 'text', owner: 'foreignobject' }])
 	expect(reading?.text).toBe(true)
+}, 56000)
+
+
+test('B3: strict browser observes decoded marker-bearing URL lists and rejects malformed list readings', async () => {
+	const { observeStrict, readStrictOutput } = await import('../differential/strict-browser.js')
+	const cases = [{ id: 'lists', kind: 'places' as const, html: '<img srcset="/a&amp;b 1x, javascript:M1=1 2x"><link imagesrcset="/a 1x, //M1=1 2x"><img srcset="/unmarked">' }]
+	const [result] = await observeStrict(cases)
+	expect(result!.lists).toEqual(['/a&b 1x, javascript:M1=1 2x', '/a 1x, //M1=1 2x'])
+	for (const lists of [undefined, null, 'x', [1]]) {
+		const encoded = Buffer.from(JSON.stringify([{ ...result, lists }])).toString('base64')
+		expect(() => readStrictOutput(`<pre id="result">${encoded}</pre>`, cases)).toThrow('Malformed strict observations')
+	}
 }, 56000)

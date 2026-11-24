@@ -11,7 +11,7 @@ entries without running any tests. The campaign uses the same validation.
 `python3 tests/mutate-context.py` always runs one fresh campaign in a copy of tracked inputs. Stage new inputs first.
 It generates mutants in that copy, baselines both test commands, and prints the Bun version, every outcome and totals.
 Only recognised test failures count as kills; full-suite fallback kills need a second failure, which may name another test.
-Timeouts, malformed output, invalid mutants, failed baselines and passing confirmations abort the campaign.
+Process, test and beforeEach/afterEach hook timeouts, malformed output, invalid mutants, failed baselines and passing confirmations abort the campaign.
 Reviewed reasons live in `tests/support/mutation-equivalents.json`; stale entries and focused-test kills fail the campaign.
 After adding or changing an entry, run `python3 tests/mutate-context.py --equivalents` (about a minute per entry).
 It baselines both commands in the same isolated copy, then checks only the reviewed mutants against the full suite.
@@ -58,10 +58,14 @@ the browser version in that historical result does not have to match the local i
   Accepted outputs must hold the literal probe as text in that owner. Self-closing text owners, foreign integration
   markup, frameset and template/col hazards are refused by the compiler.
 
+`strict-browser.ts` also reports decoded marker-bearing `srcset` and `imagesrcset` values as `lists`; malformed or missing list readings fail transport validation.
+
 `strict-browser.ts` creates and removes a fresh scripting-enabled iframe per case. CSP blocks script execution and
 resource loads; links are never activated. Each Chromium invocation has a timeout and uses an argument array. A
 failed batch is bisected until the failing case is named; no case is skipped. Generated HTML transport files live in
 temporary directories. Full `strict-run.ts` writes `STRICT-RESULT.json`; smoke mode prints its report without writing it.
+The committed `STRICT-RESULT.json` records 0.4.0's compiler. It will be written again before the release to record
+the compiler that ships.
 
 The gate runs the corpus and smoke domains of the strict families; run the full families separately. Smoke mode uses
 40 sources per random family, 650 foreign sequences (depths 1–2), and 144 text-owner sources (four element names).
@@ -93,3 +97,21 @@ The measurement runner verifies all four independent outputs in the baseline and
 before main/branch, and records eight AB/BA rounds per probe. It creates the supplied output directory and writes
 commands, raw samples, verified outputs and tables there. Add `--rounds 4` for a shorter run. The extraction command
 accepts an optional revision after the directory; `main` means the local ref, so select the intended baseline explicitly.
+
+`bun differential/each-run.ts joins` and `bun differential/each-run.ts moved` run the each-else prototype's two
+retained families against the shipped compiler. `--smoke` selects forty evenly spaced sources and runs in the gate.
+The join domain has 8,960 sources. The moved domain pins the 3,733 indices that 0.4.0 refused with G2002 among the
+160,000 random sources; its source digest is checked before execution. No old compiler is needed for replay.
+Both empty and nonempty collections run, with metadata values empty and nonempty; moved also runs both conditions.
+Every distinct source/output/expected-place combination reaches Chromium. Tests plant bad observations in the oracle.
+
+`bun differential/attribute-run.ts pieces` runs the attribute-policy prototype's 8,320 list-piece sources with its
+four payloads and both conditions. `--smoke` selects forty evenly spaced sources and runs in the gate. The source
+generator and independent `srcset` candidate oracle are pinned with the other strict families. Every candidate in a
+decoded marker-bearing list must pass the whole-prefix rule; placement and single-URL checks also apply. The smoke
+test fails if the URL checker no longer restarts at a separator. This command prints results without writing a record.
+
+`bun differential/rule17-run.ts` runs the rule 17 family: 336 cases across six HTML contexts, seven value/brace forms,
+four call paths (direct, snippet, partial and each fallback), and both strip settings. It checks independent expected
+bytes and diagnostics, then observes all accepted pages in Chromium. The complete family runs in the gate; its oracle
+tests plant missing/misplaced markers, missing refusals and changed bytes.

@@ -129,6 +129,8 @@ export interface EachNode extends NodeBase {
     readonly item: string;
     readonly index: string | null;
     readonly children: readonly TemplateNode[];
+    /** `{:else}`: what renders once when the body ran zero times. It stands outside the loop: no item, index or loop metadata. */
+    readonly fallback?: readonly TemplateNode[];
     readonly metadata?: ReadonlySet<'length' | 'isFirst' | 'isLast'>;
 }
 export interface SnippetNode extends NodeBase {

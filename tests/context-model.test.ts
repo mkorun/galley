@@ -138,7 +138,10 @@ test('real metadata boundaries: inert contexts, quoted angles, branches, snippet
 	}
 	for (const owner of ['title', 'textarea', 'script', 'style', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']) {
 		const source = `<${owner}><meta content="{ a }"></${owner}>`
-		expect(await render(source)).toBe(source.replace('{ a }', ''))
+		if (owner === 'script' || owner === 'style') {
+			await expect(galley(source)).rejects.toThrow('G3018')
+			expect(await render(source.replace('{ a }', '{@raw a}'))).toBe(source.replace('{ a }', ''))
+		} else expect(await render(source)).toBe(source.replace('{ a }', ''))
 	}
 	expect(await render('<div title="<meta content=\'{ a }\'>">')).toBe('<div title="<meta content=\'\'>">')
 	expect(await render('<meta content="{#if yes}{ a }{/if}">')).toBe('<meta content="">')

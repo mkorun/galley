@@ -2,7 +2,15 @@ import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
 import { parseExpression } from './expression.js';
 import { lex } from './lexer.js';
 import { textSpans } from './text.js';
-import { parsePath } from './path.js';
+import { checkPathRoots, parsePath } from './path.js';
+// Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
+const literalBraces = new WeakMap();
+export const braceDiagnostic = (source, offset) => {
+    const braces = literalBraces.get(source);
+    if (!braces)
+        throw new Error(`Missing brace diagnostics for ${source.id}; parse the source before reading its HTML context`);
+    return braces.get(offset);
+};
 const expressionSpan = (token, raw) => {
     const local = token.value.indexOf(raw);
     const start = local < 0 ? token.span.start : token.valueStart + local;
@@ -29,6 +37,8 @@ const joinTexts = (nodes) => {
 };
 export const parseTokens = (source, input) => {
     const tokens = [...input];
+    const braces = new Map();
+    literalBraces.set(source, braces);
     // ADR-014 as a token transform: structural tags on otherwise empty lines do
     // not leak their indentation/newline into the semantic AST.
     let sourceLineStart = 0, nextNewline = source.text.indexOf('\n');
@@ -65,11 +75,12 @@ export const parseTokens = (source, input) => {
         tokens[i + 1] = { ...next, value: next.value.slice(after), valueStart: next.valueStart + after };
     }
     let cursor = 0;
-    const parseChildren = (closing, continuations = false) => {
+    /** `continuations` names the block whose `{:…}` tags end these children: `{#if}` takes `{:else if}` and `{:else}`, `{#each}` only `{:else}`. */
+    const parseChildren = (closing, continuations = null) => {
         const children = [];
         while (cursor < tokens.length) {
             const token = tokens[cursor] ?? fail('G2999', 'Internal parser cursor escaped the token stream', astSpan);
-            if ((token.kind === 'block-close' && token.value === closing) || (continuations && token.kind === 'continuation' && (token.value === 'else' || token.value.startsWith('else if '))))
+            if ((token.kind === 'block-close' && token.value === closing) || (continuations && token.kind === 'continuation' && (token.value === 'else' || (continuations === 'if' && token.value.startsWith('else if ')))))
                 return { children: joinTexts(children), stop: token };
             cursor++;
             switch (token.kind) {
@@ -83,6 +94,8 @@ export const parseTokens = (source, input) => {
                     catch (error) {
                         if (!(error instanceof GalleyDiagnosticError))
                             throw error;
+                        if (error.diagnostic.code === 'G1007')
+                            braces.set(token.span.start, { code: 'G3019', severity: 'error', message: `Literal { in text: ${error.diagnostic.message}`, span: span(source, token.span.start, token.span.start + 1), help: `Write \\{ for a literal brace, or use $. to reach a data key with :, + or -.` });
                         // ADR-015: an expression-shaped CSS/JS collision remains literal text.
                         children.push({ kind: 'text', value: token.span.source.text.slice(token.span.start, token.span.end), span: token.span });
                     }
@@ -100,7 +113,10 @@ export const parseTokens = (source, input) => {
                     children.push(parseBlock(token));
                     break;
                 case 'block-close': return fail('G2001', `Closing tag {/${token.value}} without matching opening tag`, token.span);
-                case 'continuation': return fail('G2002', `Continuation tag {:${token.value}} is only valid inside {#if}`, token.span);
+                case 'continuation':
+                    if (continuations === 'each')
+                        return fail('G2002', `{#each} takes {:else} only, not {:${token.value}}`, token.span, 'Put an {#if} inside the {:else} branch.');
+                    return fail('G2002', `Continuation tag {:${token.value}} is only valid inside {#if}, and a single {:else} inside {#each}`, token.span);
             }
         }
         return { children: joinTexts(children), stop: null };
@@ -171,7 +187,7 @@ export const parseTokens = (source, input) => {
         const branches = [];
         let condition = parseExpression(conditionRaw, expressionSpan(opening, conditionRaw));
         while (true) {
-            const result = parseChildren('if', true);
+            const result = parseChildren('if', 'if');
             branches.push({ condition, children: result.children, span: opening.span });
             const stop = result.stop ?? fail('G2202', `Unclosed {#if ${conditionRaw}}`, opening.span, 'Add {/if} after the block.');
             cursor++;
@@ -209,16 +225,22 @@ export const parseTokens = (source, input) => {
         let collection;
         try {
             collection = parsePath(collectionRaw, expressionSpan(opening, collectionRaw));
+            checkPathRoots(collection);
         }
         catch (error) {
             if (!(error instanceof GalleyDiagnosticError))
                 throw error;
             return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, expressionSpan(opening, collectionRaw), error.diagnostic.message);
         }
-        const result = parseChildren('each');
+        const result = parseChildren('each', 'each');
         const stop = result.stop ?? fail('G2215', `Unclosed {#each ${body}}`, opening.span, 'Add {/each} after the loop.');
         cursor++;
-        return { kind: 'each', collection, item, index, children: result.children, span: span(opening.span.source, opening.span.start, stop.span.end) };
+        if (stop.kind === 'block-close')
+            return { kind: 'each', collection, item, index, children: result.children, span: span(opening.span.source, opening.span.start, stop.span.end) };
+        const fallback = parseChildren('each');
+        const fallbackStop = fallback.stop ?? fail('G2215', `Unclosed {#each ${body}}`, opening.span, 'Add {/each} after the {:else} branch.');
+        cursor++;
+        return { kind: 'each', collection, item, index, children: result.children, fallback: fallback.children, span: span(opening.span.source, opening.span.start, fallbackStop.span.end) };
     };
     const parseSnippet = (opening) => {
         const body = opening.value.slice(7).trim();

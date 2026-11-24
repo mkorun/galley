@@ -22,8 +22,8 @@ test('G-40/P3: settled metadata URLs keep static ampersands before writes', asyn
 })
 
 test('G-40/P3: lint and compile agree on generated global names', async () => {
-	for (const source of ['{@const String = 1}', '{#snippet Object()}x{/snippet}', '{#if p}{@const Array = 1}{/if}', '{@partial p.sort}']) {
-		const options = { includes: { import: async () => '{@const TypeError = 1}' } }
+	for (const source of ['{@const String = 1}', "{#snippet Object()}x{/snippet}{@js}return ''{@js}", '{#if p}{@const Array = 1}{/if}', '{@partial p.sort}']) {
+		const options = { allowCode: true, includes: { import: async () => '{@const TypeError = 1}' } }
 		await expect(galley(source, options)).rejects.toThrow('G3007')
 		expect((await lint(source, options)).some(d => d.code === 'G3007')).toBe(true)
 	}

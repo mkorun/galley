@@ -31,7 +31,9 @@ const expandPartials = async (ast, options) => {
             else if (node.kind === 'if') {
                 result.push({ ...node, branches: await Promise.all(node.branches.map(async (branch) => ({ ...branch, children: await expand(branch.children, chain) }))) });
             }
-            else if (node.kind === 'each' || node.kind === 'snippet')
+            else if (node.kind === 'each')
+                result.push({ ...node, children: await expand(node.children, chain), ...(node.fallback ? { fallback: await expand(node.fallback, chain) } : {}) });
+            else if (node.kind === 'snippet')
                 result.push({ ...node, children: await expand(node.children, chain) });
             else
                 result.push(node);
@@ -46,7 +48,9 @@ const stripStatic = (nodes, root = false) => nodes.map((node, index) => {
         return stripText(node, root && index === nodes.length - 1);
     if (node.kind === 'if')
         return { ...node, branches: node.branches.map(branch => ({ ...branch, children: stripStatic(branch.children) })) };
-    if (node.kind === 'each' || node.kind === 'snippet')
+    if (node.kind === 'each')
+        return { ...node, children: stripStatic(node.children), ...(node.fallback ? { fallback: stripStatic(node.fallback) } : {}) };
+    if (node.kind === 'snippet')
         return { ...node, children: stripStatic(node.children) };
     if (node.kind === 'partial')
         return { ...node, children: stripStatic(node.children ?? []) };

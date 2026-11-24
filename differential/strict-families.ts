@@ -17,13 +17,13 @@ const refusal = (error: unknown): string => {
 	if (!(error instanceof GalleyDiagnosticError)) throw error
 	return error.diagnostic.code
 }
-const slots = (nodes: readonly TemplateNode[], found = new Map<string, Set<string>>()): Map<string, Set<string>> => {
+export const valuePlaces = (nodes: readonly TemplateNode[], found = new Map<string, Set<string>>()): Map<string, Set<string>> => {
 	for (const node of nodes) {
 		if (node.kind === 'output' && node.expression.kind === 'path') {
 			const name = node.expression.root, places = found.get(name) ?? new Set<string>()
 			places.add(node.slot!.place); found.set(name, places)
-		} else if (node.kind === 'if') for (const branch of node.branches) slots(branch.children, found)
-		else if (node.kind === 'each') slots(node.children, found)
+		} else if (node.kind === 'if') for (const branch of node.branches) valuePlaces(branch.children, found)
+		else if (node.kind === 'each') { valuePlaces(node.children, found); valuePlaces(node.fallback ?? [], found) }
 	}
 	return found
 }
@@ -47,7 +47,7 @@ export const strictFamilies = async (full: boolean) => {
 			let template: Awaited<ReturnType<typeof galley>>
 			try { template = await galley(source) } catch (error) { refusal(error); continue }
 			accepted++
-			const reading = slots(readContexts(parse({ id: 'random', text: source })).children)
+			const reading = valuePlaces(readContexts(parse({ id: 'random', text: source })).children)
 			const names = [...reading.keys()]
 			for (const selected of names) for (const p of [false, true]) for (const emptyMeta of [false, true]) {
 				const data: Record<string, unknown> = { p, xs: [1, 2] }
@@ -118,6 +118,6 @@ export const strictFamilies = async (full: boolean) => {
 /** Pin the committed productions and browser/placement oracle before starting the extended campaign. */
 export const strictSourceDigest = async (): Promise<string> => {
 	const digest = new Bun.CryptoHasher('sha256')
-	for (const file of ['random.ts', 'strict-families.ts', 'strict-browser.ts', 'chromium.ts']) digest.update(await Bun.file(new URL(file, import.meta.url)).text())
+	for (const file of ['random.ts', 'strict-families.ts', 'strict-browser.ts', 'chromium.ts', 'each-families.ts', 'each-moved.ts', 'rule17-families.ts', 'pieces-families.ts', 'srcset.ts']) digest.update(await Bun.file(new URL(file, import.meta.url)).text())
 	return digest.update('').digest('hex')
 }

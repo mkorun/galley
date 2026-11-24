@@ -1,7 +1,12 @@
 /** Targeted attribute-prefix admission, never an HTML parser. */
 type Mode = 'leading' | 'slash' | 'scheme' | 'relative' | 'allowed' | 'forbidden' | 'undecided'
 const SCHEMES = ['http', 'https', 'mailto', 'tel']
-const TAB = 9, LF = 10, CR = 13, SPACE = 32, AMPERSAND = 38, PLUS = 43, MINUS = 45, PERIOD = 46, SLASH = 47, COLON = 58, BACKSLASH = 92
+const TAB = 9, LF = 10, FF = 12, CR = 13, SPACE = 32, AMPERSAND = 38, PLUS = 43, COMMA = 44, MINUS = 45, PERIOD = 46, SLASH = 47, COLON = 58, BACKSLASH = 92
+/** Attributes that hold a list of URLs. A browser begins a URL of the list only at its start, after whitespace or after a comma. */
+export const URL_LISTS: ReadonlySet<string> = new Set(['srcset', 'imagesrcset'])
+/** A list separator or the beginning of a character reference: what can end a piece of a list. */
+const PIECE_END = /[\t\n\f\r ,&]/g
+const isListSeparator = (code: number): boolean => code === SPACE || code === COMMA || code === TAB || code === LF || code === FF || code === CR
 const isLetter = (code: number): boolean => (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
 const isDigit = (code: number): boolean => code >= 48 && code <= 57
 export class UrlPrefix {
@@ -12,10 +17,12 @@ export class UrlPrefix {
 	private readonly chunks: string[] = []
 	/** Nonempty dynamic writes checked so far, including completed dynamic snippet results. */
 	checkpoints = 0
-	constructor(readonly attribute: string) {}
+	/** In a list, every piece between separators is admitted like a URL of its own. */
+	private readonly list: boolean
+	constructor(readonly attribute: string) { this.list = URL_LISTS.has(attribute) }
 
-	/** No later character can make the value another scheme's URL or one that starts with two slashes. */
-	get settled(): boolean { return this.mode === 'relative' || this.mode === 'allowed' }
+	/** No later character can make the value another scheme's URL or one that starts with two slashes. A list never settles: its next piece may. */
+	get settled(): boolean { return !this.list && (this.mode === 'relative' || this.mode === 'allowed') }
 
 	get forbidden(): boolean { return this.mode === 'forbidden' }
 
@@ -50,9 +57,18 @@ export class UrlPrefix {
 		this.chunks.push(text)
 		if (this.mode === 'forbidden' || this.mode === 'undecided') return
 		for (let index = 0; index < text.length && !this.settled; index++) {
-			const code = text.charCodeAt(index)
+			let code = text.charCodeAt(index)
+			// Only a list comes here with a piece that is settled: of the rest of that piece, a separator or a reference matters, nothing else.
+			if (this.mode === 'relative' || this.mode === 'allowed') {
+				PIECE_END.lastIndex = index
+				if (!PIECE_END.test(text)) return
+				index = PIECE_END.lastIndex - 1; code = text.charCodeAt(index)
+			}
 			if (code === AMPERSAND && !escaped) { this.mode = 'undecided'; return }
+			if (this.list && isListSeparator(code)) { this.mode = 'leading'; this.schemeLength = 0; this.schemes = (1 << SCHEMES.length) - 1; continue }
 			this.read(code === 0 ? 0xfffd : code)
+			// A forbidden piece stays forbidden: no later separator begins the value anew.
+			if (this.forbidden) return
 		}
 	}
 

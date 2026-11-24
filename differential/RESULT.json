@@ -1,6 +1,6 @@
 {
   "inputDigest": "7d5d09a8684c2427b796f040fffc7ec56cac02cdc689aaf250a9614ef949e517",
-  "corpusDigest": "fe6a488d32a1e5c14445a562712cc2a5dadcc209db51010db1232dc39d6b289c",
+  "corpusDigest": "6d2141ebec85de6222899ef50f29e5316e06fec2a3fe281520b8c80a72bc0d7a",
   "seed": "0x20261117",
   "browser": "Chromium 156.0.8078.79 built on Debian GNU/Linux 13 (trixie)",
   "corpus": 82,
@@ -14,6 +14,6 @@
   "cases": 1002,
   "checkpoints": 549,
   "stops": 125,
-  "refusals": 586,
+  "refusals": 588,
   "failures": []
 }

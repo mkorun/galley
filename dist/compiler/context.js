@@ -1,6 +1,8 @@
-import { textPosition } from './text.js';
-import { fail } from './diagnostics.js';
-import { UrlPrefix } from './url.js';
+import { braceDiagnostic } from './parser.js';
+import { scriptedSnippets } from './analysis.js';
+import { textPosition, textSpans } from './text.js';
+import { fail, GalleyDiagnosticError, locate } from './diagnostics.js';
+import { URL_LISTS, UrlPrefix } from './url.js';
 const asciiLower = (value) => value.replace(/[A-Z]/g, letter => String.fromCharCode(letter.charCodeAt(0) + 32));
 const SPACE = /[\t\n\f\r ]/;
 const URL_ATTRIBUTES = new Set(['href', 'src', 'action', 'formaction', 'poster', 'cite', 'xlink:href']);
@@ -18,6 +20,8 @@ const HELP = {
     G3012: 'Finish the tag, quoted value or text element before the template ends.',
     G3013: 'Keep delimiters literal. Inside <svg> or <math>, text elements hold no <, {@raw} or {@js}.',
     G3016: 'Write animation to, from, by and values attributes statically, without any template tags.',
+    G3017: 'An on* attribute holds script and srcdoc holds a document: write them statically, without any template tags, and hand values over in data-* attributes.',
+    G3018: 'HTML escaping does not secure script or style. Pass data through data-* attributes, or use {@raw} with your own JavaScript or CSS encoding. Write \\{ for a literal brace that was never meant as a value.',
     G3014: 'Follow HTML writing rules: write names and end tags in one piece, separate attributes with whitespace, quote values, and write a literal < as &lt;.',
 };
 const position = (at) => typeof at === 'function' ? at() : at;
@@ -25,18 +29,21 @@ const data = () => ({ state: 'data', tag: '', attribute: '', delimited: false, o
 const same = (a, b) => a.owner === b.owner && a.svg === b.svg && a.math === b.math && a.template === b.template && a.tagId === b.tagId && a.quote === b.quote;
 const describe = (context) => `${context.state}(${context.tag || context.owner}${context.attribute ? '.' + context.attribute : ''}; tagId=${context.tagId}, quote=${context.quote}, svg=${context.svg}, math=${context.math}, template=${context.template})`;
 const refuse = (code, at, context, rule, text) => fail(code, `HTML context ${describe(context)}; rule ${rule}: ${excerpt(text)}`, position(at), HELP[code]);
-const animationValue = (context, at) => {
-    if ((context.state === 'double' || context.state === 'single' || context.state === 'before-value')
-        && ANIMATION_ELEMENTS.has(context.tag) && ANIMATION_VALUES.has(context.attribute)) {
+/** Values that hold another language a browser runs. HTML escaping does not secure it, so no template tag stands in them. */
+const staticValue = (context, at) => {
+    if (context.state !== 'double' && context.state !== 'single' && context.state !== 'before-value')
+        return;
+    const animation = ANIMATION_ELEMENTS.has(context.tag) && ANIMATION_VALUES.has(context.attribute);
+    if (animation || context.attribute.startsWith('on') || context.attribute === 'srcdoc') {
         const where = position(at);
-        refuse('G3016', where, context, '15', where.source.text.slice(where.start, where.end));
+        refuse(animation ? 'G3016' : 'G3017', where, context, animation ? '15' : '16', where.source.text.slice(where.start, where.end));
     }
 };
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
 export const readContexts = (ast) => {
     let identity = 0, sequence = 0;
     const starts = [];
-    const scripted = new Set();
+    const scripted = scriptedSnippets(ast.children);
     const variants = new Map();
     const actualWrites = new Set();
     const renderWrites = [];
@@ -72,14 +79,20 @@ export const readContexts = (ast) => {
         const at = (offset) => textPosition(node, offset);
         const records = [];
         const open = context.open;
-        let index = 0;
+        let index = 0, brace = value.indexOf('{'), sourcePart = 0, sourceOffset = 0;
+        const spans = textSpans(node);
         while (index < value.length) {
             const char = value[index];
+            const scriptOrStyle = context.owner === 'script' || context.owner === 'style';
             switch (context.state) {
                 case 'data': {
                     const less = value.indexOf('<', index);
                     if (less < 0) {
                         index = value.length;
+                        break;
+                    }
+                    if (less > index) {
+                        index = less;
                         break;
                     }
                     const rest = value.slice(less);
@@ -167,7 +180,7 @@ export const readContexts = (ast) => {
                         index++;
                         if (value.indexOf(char, index) < 0) {
                             const start = index;
-                            const prefix = URL_ATTRIBUTES.has(context.attribute) ? new UrlPrefix(context.attribute) : null;
+                            const prefix = URL_ATTRIBUTES.has(context.attribute) || URL_LISTS.has(context.attribute) ? new UrlPrefix(context.attribute) : null;
                             const startText = value.slice(start), ampersand = startText.indexOf('&');
                             prefix?.feed(ampersand < 0 ? startText : startText.slice(0, ampersand));
                             const url = prefix && !prefix.settled ? context.attribute : null;
@@ -191,6 +204,10 @@ export const readContexts = (ast) => {
                 case 'double':
                 case 'single': {
                     const close = value.indexOf(context.state === 'double' ? '"' : "'", index);
+                    // In a URL list a reference may stand for a separator, wherever it is: none in the static text of a value that is written into.
+                    const rest = value.slice(index, close < 0 ? value.length : close), start = index, list = context.open;
+                    if (list?.url && URL_LISTS.has(list.url) && rest.includes('&'))
+                        starts.push({ value: list, text: rest, at: offset => at(start + offset), forbidden: false });
                     if (close < 0) {
                         index = value.length;
                         break;
@@ -210,6 +227,7 @@ export const readContexts = (ast) => {
                     const end = '</' + context.owner;
                     const rest = asciiLower(value.slice(less, less + end.length + 1));
                     if (rest.startsWith(end) && /^[\t\n\f\r \/>]/.test(rest.slice(end.length))) {
+                        index = less;
                         Object.assign(context, { state: 'data', owner: '', strict: false });
                         break;
                     }
@@ -220,6 +238,19 @@ export const readContexts = (ast) => {
                     index = less + 1;
                     break;
                 }
+            }
+            while (brace >= 0 && brace < index) {
+                if (!scriptOrStyle) {
+                    while (sourceOffset + spans[sourcePart].end - spans[sourcePart].start <= brace) {
+                        sourceOffset += spans[sourcePart].end - spans[sourcePart].start;
+                        sourcePart++;
+                    }
+                    const part = spans[sourcePart];
+                    const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset);
+                    if (diagnostic)
+                        throw new GalleyDiagnosticError(diagnostic);
+                }
+                brace = value.indexOf('{', brace + 1);
             }
         }
         return { ...node, records, ...(open ? { open } : {}) };
@@ -250,6 +281,8 @@ export const readContexts = (ast) => {
         if (context.state === 'data' || context.state === 'text') {
             if (context.strict && (opaque || context.owner === 'script' || context.owner === 'style'))
                 refuse('G3013', at, context, '13', at.source.text.slice(at.start, at.end));
+            if (!opaque && !render && (context.owner === 'script' || context.owner === 'style'))
+                refuse('G3018', at, context, '17', at.source.text.slice(at.start, at.end));
             return { place, url: false, metadata: false };
         }
         return refuse(opaque || render ? 'G3009' : 'G3008', at, context, '10', at.source.text.slice(at.start, at.end));
@@ -267,43 +300,6 @@ export const readContexts = (ast) => {
         declare(nodes, scope);
         return scope;
     };
-    // Only unmarked visible bindings need a visit at a JS block. Shadowing temporarily hides them.
-    const visible = new Map(), unmarked = new Set();
-    const markScripted = (nodes, scope) => {
-        const previous = new Map();
-        for (const [name, binding] of scope.bindings) {
-            const outer = visible.get(name);
-            if (outer) {
-                previous.set(name, outer);
-                unmarked.delete(outer);
-            }
-            visible.set(name, binding);
-            unmarked.add(binding);
-        }
-        for (const node of nodes) {
-            if (node.kind === 'js') {
-                for (const binding of unmarked)
-                    scripted.add(binding.node);
-                unmarked.clear();
-            }
-            else if (node.kind === 'partial')
-                markScripted(node.children ?? [], { parent: scope, bindings: new Map() });
-            else if (node.kind === 'if')
-                for (const branch of node.branches)
-                    markScripted(branch.children, openScope(branch.children, scope));
-            else if (node.kind === 'each' || node.kind === 'snippet')
-                markScripted(node.children, openScope(node.children, scope));
-        }
-        for (const [name, binding] of scope.bindings) {
-            visible.delete(name);
-            unmarked.delete(binding);
-        }
-        for (const [name, binding] of previous) {
-            visible.set(name, binding);
-            if (!scripted.has(binding.node))
-                unmarked.add(binding);
-        }
-    };
     const resolve = (scope, name) => {
         for (let current = scope; current; current = current.parent) {
             const binding = current.bindings.get(name);
@@ -317,7 +313,7 @@ export const readContexts = (ast) => {
         const last = children[children.length - 1];
         const end = () => last?.kind === 'text' && last.value.length ? textPosition(last, last.value.length - 1) : at;
         if (closes)
-            animationValue(exit, end);
+            staticValue(exit, end);
         boundary(exit, end, code);
         if (!same(entry, exit))
             refuse(code, end, entry, '11', describe(exit));
@@ -335,7 +331,15 @@ export const readContexts = (ast) => {
         binding.variants.set(key, variant);
         binding.list.push(variant);
         binding.active = entry;
-        variant.children = path(binding.node.children, entry, openScope(binding.node.children, binding.scope), 'G3011', binding.node.span).children;
+        try {
+            variant.children = path(binding.node.children, entry, openScope(binding.node.children, binding.scope), 'G3011', binding.node.span).children;
+        }
+        catch (error) {
+            if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code !== 'G3018')
+                throw error;
+            const { line, column } = locate(at.source, at.start);
+            throw new GalleyDiagnosticError({ ...error.diagnostic, help: `${error.diagnostic.help} Rendered by ${at.source.text.slice(at.start, at.end)} at ${at.source.id}:${line}:${column}.` });
+        }
         binding.active = null;
         return variant.name;
     };
@@ -346,7 +350,7 @@ export const readContexts = (ast) => {
                 result.push(read(node, context, index + 1 < nodes.length || closes));
                 continue;
             }
-            animationValue(context, node.span);
+            staticValue(context, node.span);
             if (node.kind === 'const') {
                 boundary(context, node.span);
                 result.push(node);
@@ -375,8 +379,10 @@ export const readContexts = (ast) => {
                 }
                 case 'each': {
                     const body = path(node.children, { ...context, delimited: false }, openScope(node.children, scope), 'G3010', node.span);
-                    context.delimited &&= body.delimited;
-                    result.push({ ...node, children: body.children });
+                    // Zero iterations write the fallback, or nothing: that path starts as the block does, like a branch of {#if}.
+                    const fallback = node.fallback ? path(node.fallback, context, openScope(node.fallback, scope), 'G3010', node.span) : null;
+                    context.delimited = body.delimited && (fallback ? fallback.delimited : context.delimited);
+                    result.push({ ...node, children: body.children, ...(fallback ? { fallback: fallback.children } : {}) });
                     break;
                 }
                 case 'partial': {
@@ -402,7 +408,6 @@ export const readContexts = (ast) => {
         return result;
     };
     const scope = openScope(ast.children, null);
-    markScripted(ast.children, scope);
     const context = data(), children = visit(ast.children, context, scope);
     if (context.state !== 'data')
         refuse('G3012', { ...ast.span, start: ast.span.end }, context, '12', describe(context));
@@ -422,8 +427,10 @@ export const readContexts = (ast) => {
             else if (node.kind === 'if')
                 for (const branch of node.branches)
                     inspect(branch.children, variant);
-            else if (node.kind === 'each')
+            else if (node.kind === 'each') {
                 inspect(node.children, variant);
+                inspect(node.fallback ?? [], variant);
+            }
         }
     };
     for (const variant of variants.values()) {
@@ -445,7 +452,7 @@ export const readContexts = (ast) => {
         if (actualWrites.has(start.value)) {
             if (start.forbidden)
                 fail('G3015', `HTML context URL; forbidden static prefix: ${excerpt(start.text)}`, start.at(0), 'Use a relative URL, or http:, https:, mailto: or tel:, before a dynamic value.');
-            fail('G3015', `HTML context URL; rule 14: ${excerpt(start.text)}`, start.at(start.text.indexOf('&')), 'Write the character itself, not a reference, before a value in a URL.');
+            fail('G3015', `HTML context URL; rule 14: ${excerpt(start.text)}`, start.at(start.text.indexOf('&')), URL_LISTS.has(start.value.url) ? 'Move query text into an escaped value in a URL list.' : 'Write the character itself, not a reference, before a value in a URL.');
         }
     return { ...ast, children };
 };

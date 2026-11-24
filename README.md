@@ -96,6 +96,19 @@ const html = await tpl.render({
 
 All template data lives in the context object `$`. `{ meta.title }` accesses `$.meta?.title` — undefined values produce an empty string, never an error.
 
+The first name of a path is an identifier (`A-Z`, `a-z`, `_` or `$`, followed by those characters or digits).
+Later names may also contain `:`, `+` and `-`: write `{ $.user-name }` or `{ meta.og:image }` for such data keys.
+An output that fails only this first-name rule is G3019 outside script/style, including in title, textarea and
+attributes. Other tags report their normal parse error. Write `\{` for a literal opening brace.
+
+Inside script/style, an escaped value is G3018; HTML escaping cannot encode JavaScript or CSS. Pass data through
+`data-*` attributes or use `{@raw}` with your own encoding. A snippet reports the offending value and its render call.
+Write `\{` for a literal brace that was never meant as a value, including JavaScript and CSS braces.
+A brace whose first name contains `:`, `+` or `-` stays literal there: `<style>b{margin:0}</style>` now retains its CSS,
+and `<script>var n = "{ user-name }"</script>` retains those literal braces instead of inserting the data value.
+These rules are always on. Other malformed expressions retain their existing literal-text behavior; no strict-brace
+option is introduced by this change.
+
 The compiler also exports `lint()`, structured diagnostics, and the typed AST
 parser for editor and build-tool integrations:
 
@@ -181,6 +194,12 @@ later static text or raw/JS output makes an unsettled prefix permanently undecid
 raw/JS write itself, stops rendering with `G5001`. The message names the attribute and quotes the serialized prefix,
 including that `&`. Once settled, references are allowed, for example `/x?a=1&amp;b={ value }`.
 
+`srcset` and `imagesrcset` receive the same check for every piece beginning at the start, after ASCII whitespace,
+or after a comma. Relative and `http:`, `https:`, `mailto:` and `tel:` pieces pass; `//cdn…`, `data:` and other
+schemes stop with G5001. A list never settles. In a list with a dynamic write, static text may contain no `&`
+anywhere (G3015), because a reference could encode a separator. Put query text in an escaped value instead:
+`<img srcset="{ source.srcset }">`. A completely static list remains the author's responsibility.
+
 Processing is incremental and linear in output size. `{@raw}` and `{@js}` receive this source-slot check and remain
 outside the safety boundary; their authors must preserve the insertion context.
 
@@ -190,7 +209,15 @@ outside the safety boundary; their authors must preserve the insertion context.
 <html lang="{ meta.lang ?? 'en' }">
 ```
 
-Fallback values must be literals: strings (`'…'` / `"…"`), numbers (`1`, `1.5`), `true`, `false`, `null`, or `undefined` — not arbitrary expressions.
+Fallback values may be paths (`{ missing ?? other.value }`) or literals: strings (`'…'` / `"…"`), numbers (`1`, `1.5`), `true`, `false`, `null`, or `undefined` — not arbitrary JavaScript.
+
+Names bound by loops, snippet parameters, constants and snippets callable by `{@js}` must be valid in strict async
+JavaScript and must not be `String`, `Object`, `Array`, `TypeError` or `undefined` (G3007). This includes `await`, even
+without an awaiting JS block. Other snippet names have no JavaScript binding and are exempt.
+Two declarations in one generated scope are G3021, including constants from partials, snippet parameters,
+loop metadata and snippet names callable by `{@js}`. The diagnostic points to the second declaration and names both
+declarations' partial inclusion paths when present.
+Constants in inner blocks may shadow outer names; a constant in a loop body may also shadow its item or index.
 
 ---
 
@@ -301,6 +328,19 @@ Iterates over arrays and objects. Loop helper variables are available inside the
 ```html
 {#each site.pages as page}
   <a href="{ page.urlPath }">{ page.meta.title }</a>
+{/each}
+```
+
+An optional `{:else}` renders once when the body runs zero times: an empty array or object, `null`, `undefined`,
+or another value with no items. It stands outside the loop, so the item, index and metadata names refer to their
+surrounding bindings there. Body and fallback have separate snippet scopes. Only one `{:else}` is allowed;
+put an `{#if}` inside it for another condition. A standalone `{:else}` line leaves no extra line break.
+
+```html
+{#each articles as article}
+  <p>{ article.title }</p>
+{:else}
+  <p>No articles.</p>
 {/each}
 ```
 
@@ -596,8 +636,10 @@ browser repair at these boundaries; it does not validate a complete document tre
 | 11 | Every branch, iteration, partial and snippet preserves state, tag, attribute, text owner, foreign/template counts, open tag and open quote. Between attributes, each following attribute needs whitespace on every path; a template tag cannot split `=` from its value. | G3010 for blocks; G3011 for calls; malformed separators: G3014 |
 | 12 | The template finishes in ordinary text. | G3012 |
 | 13 | Inside counted `svg`/`math`, text elements and integration points hold text only: no `<` except their own end tag, and no raw/JS output. Values in foreign `script`/`style` are refused. | G3013 |
-| 14 | In a value with a dynamic write, the unsettled URL start before the first template tag contains no `&` and is not already forbidden. | G3015 |
+| 14 | In a value with a dynamic write, the unsettled URL start before the first template tag contains no `&` and is not already forbidden. In URL lists, no static text in the value contains `&`. | G3015 |
 | 15 | On `set`, `animate`, `animateMotion` and `animateTransform`, `to`, `from`, `by` and `values` contain no template tags of any kind. Names are ASCII case-insensitive, in every namespace, regardless of `attributeName`; this includes attributes supplied by snippets or partials. Static values stay valid. | G3016 |
+| 16 | Attributes beginning with `on` and `srcdoc` contain no template tags of any kind. Names are ASCII case-insensitive in every namespace. Whole static attributes inside blocks remain allowed. Hand values to handlers through `data-*`. | G3017 |
+| 17 | Escaped output cannot appear in `script` or `style`, including through a snippet or partial. Static text and raw/JS output retain their existing rules. | G3018 |
 
 `G3016` means an animation value contains a template tag. Write `to`, `from`, `by` and `values` statically;
 changing `attributeName` does not enable dynamic values. Refusals locate the offending character, quote a short
@@ -612,16 +654,15 @@ CDATA is refused everywhere with `G3014`. Scripting is assumed enabled: `noscrip
 
 Snippet specializations use the exact structural context and whether URL writes need checking; metadata tracking follows from the tag and attribute.
 Context-changing recursion is `G3011`. A snippet lexically visible to `{@js}` also has an explicit ordinary-text
-specialization callable by JavaScript; `allowCode: true` alone does not require one. `String`, `Object`, `Array`
-and `TypeError` are reserved for generated runtime calls (`G3007`). `lint()` keeps warnings beside context errors
+specialization callable by JavaScript; `allowCode: true` alone does not require one. `String`, `Object`, `Array`,
+`TypeError` and `undefined` are reserved for generated runtime code (`G3007`). `lint()` keeps warnings beside context errors
 and accepts the same compile options. It always returns `Promise<Diagnostic[]>`: use `await lint(source, options)`.
 With `includes`, it resolves partials and applies the same context and `strip` checks as `galley()`. Without a resolver,
 it treats each partial as preserving its context and continues checking the surrounding template.
 
-- **HTML escaping does not secure nested languages.** Script/style contents, event handlers, `style`, `srcdoc`,
-  `srcset`, CSS URLs and other nested languages remain the author's responsibility. Raw/JS output must preserve
-  its insertion context. The seven named URL attributes receive prefix admission, without an origin policy or
-  completed-URL validation.
+- **HTML escaping does not secure nested languages.** Escaped values in script/style are refused. Raw/JS contents, `style` attributes, CSS URLs and other unchecked nested languages remain the author's responsibility.
+  Event handlers and `srcdoc` must be static. Raw/JS output must preserve its insertion context. The seven named URL
+  attributes and both URL lists receive prefix admission, without an origin policy or completed-URL validation.
 - **Standalone comment lines go in the lexer, everywhere, as in 0.3.4.** Removal includes indentation and the following
   line break, or the preceding LF/CRLF at source end. This also applies inside script, title and attribute values,
   including template tags held by those lines. Removing a `<galley:config>` on the same line can make a comment

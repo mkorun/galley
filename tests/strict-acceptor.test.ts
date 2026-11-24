@@ -62,7 +62,8 @@ test('rules 1/7/8: comments and declarations are whole, and text end tags cannot
 	for (const source of ['a < b', '<?xml?>', '<![CDATA[x]]>', '<!foo>', 'x<!-->y', 'x<!--> -->y', 'x<!--->y', 'x<!--x--!>y', 'x<!--x', '<!DOCTYPE>', '<!DOCTYPEhtml>', '<!DOCTYPE html', '<!DOCTYPE <x>>', '<title>a</tit{ x }le></title>', '<script><!{ x }</script>', '<style>x</style x>']) await refuse(source)
 	for (const source of ['x<!-- { x } -->', 'x<!-- {#if p}x{/if} -->', '<!DOCTYPE { x }>']) await refuse(source, 'G3013')
 	await refuse('<script><!--<script></script>', 'G3013')
-	for (const source of ['<!doctype html><p>x</p>', 'x<!---->y', 'x<!---x-->y', '<title>a<b>{ x }</title>', '<script>a<!x{ x }</script>']) expect(await render(source, { x: 'X' })).toContain('>')
+	for (const source of ['<!doctype html><p>x</p>', 'x<!---->y', 'x<!---x-->y', '<title>a<b>{ x }</title>']) expect(await render(source, { x: 'X' })).toContain('>')
+	await refuse('<script>a<!x{ x }</script>', 'G3018')
 	for (const source of ['<a', '<a href="', '<title>x', '<script>x']) await refuse(source, 'G3012')
 	await refuse('<a x="', 'G3012')
 })
@@ -364,7 +365,7 @@ test('G-32: every review bypass keeps its refusal or URL checkpoint', async () =
 		['<title>a</title/><a href="{ u }">x</a></title>', 'G3014'],
 		['<title>a</title\f><a href="{ u }">x</a></title>', 'G5001'],
 		['<title>{#if p}</title><textarea>{/if}</textarea><a href="{ u }">x</a></title>', 'G3010'],
-		['{#snippet s(u)}<style><b><a href="{ u }">x</a></style>{/snippet}{@render s(a)}<math>{@render s(u)}</math>', 'G3013'],
+		['{#snippet s(u)}<style><b><a href="{ u }">x</a></style>{/snippet}{@render s(a)}<math>{@render s(u)}</math>', 'G3018'],
 		['{#snippet s(u)}<col><title></template><a href="{ u }">x</a></title>{/snippet}<table>{@render s(a)}</table><template>{@render s(u)}', 'G3013'],
 	]
 	for (const [source, code] of cases) await expect(render(source, { u: 'javascript:x', a: '/ok', p: true })).rejects.toThrow(code)

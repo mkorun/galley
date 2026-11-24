@@ -8,11 +8,12 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 COPY_FILES = ['index.ts', 'types.ts', 'util.ts', 'bunfig.toml', 'tsconfig.json', 'check.sh']
 # The generator owns the mutated-file list; the focused test selection is a separate execution concern.
-TESTS = ['tests/' + name for name in ['strict-acceptor.test.ts', 'mechanical-reader.test.ts', 'second-correction.test.ts', 'url-static-start.test.ts', 'url-static-suffix.test.ts', 'url-end-check.test.ts', 'mutation-flow.test.ts', 'lint-mutations.test.ts', 'third-correction.test.ts', 'fourth-correction.test.ts', 'growth-semantics.test.ts', 'config-regression.test.ts', 'comment-search.test.ts', 'lint-async.test.ts', 'context-model.test.ts', 'url-attributes.test.ts', 'review-findings.test.ts', 'stripped-marks.test.ts', 'compiler.test.ts', 'loops.test.ts', 'snippets.test.ts']]
+TESTS = ['tests/' + name for name in ['reader-names.test.ts', 'expression-path.test.ts', 'each-else.test.ts', 'attribute-policy.test.ts', 'bindings.test.ts', 'strict-acceptor.test.ts', 'mechanical-reader.test.ts', 'second-correction.test.ts', 'url-static-start.test.ts', 'url-static-suffix.test.ts', 'url-end-check.test.ts', 'mutation-flow.test.ts', 'lint-mutations.test.ts', 'third-correction.test.ts', 'fourth-correction.test.ts', 'growth-semantics.test.ts', 'config-regression.test.ts', 'comment-search.test.ts', 'lint-async.test.ts', 'context-model.test.ts', 'url-attributes.test.ts', 'review-findings.test.ts', 'stripped-marks.test.ts', 'compiler.test.ts', 'loops.test.ts', 'snippets.test.ts']]
 FAILURE = re.compile(r'^\(fail\) (.+?)(?: \[[0-9.]+ms\])?$', re.MULTILINE)
 PASS = re.compile(r'^\s*[1-9][0-9]* pass\s*$', re.MULTILINE)
 ZERO_FAILURES = re.compile(r'^\s*0 fail\s*$', re.MULTILINE)
@@ -56,7 +57,7 @@ def test_failures(command, target, timeout):
     result = execute(command, target, timeout)
     output = result.stdout + result.stderr
     failures = FAILURE.findall(output)
-    if 'this test timed out after' in output:
+    if 'this test timed out after' in output or 'a beforeEach/afterEach hook timed out for this test' in output:
         raise SystemExit(f'Mutation campaign: Bun test timeout:\n{output}')
     if result.returncode > 0 and failures:
         return failures
@@ -109,8 +110,9 @@ def read_equivalents(target, mutations):
             raise ValueError('expected an object of nonempty reviewed reasons')
     except (ValueError, OSError) as error:
         raise SystemExit(f'Mutation campaign: invalid equivalence list: {error}') from error
-    if set(equivalents) - {m['id'] for m in mutations}:
-        raise SystemExit('Stale equivalence entries')
+    stale = set(equivalents) - {m['id'] for m in mutations}
+    if stale:
+        raise SystemExit('Stale equivalence entries:\n' + '\n'.join(sorted(stale)))
     return equivalents
 
 
@@ -118,6 +120,7 @@ def run():
     if sys.argv[1:] not in [[], ['--equivalents'], ['--list']]:
         raise SystemExit('usage: python3 tests/mutate-context.py [--equivalents | --list]')
     check_equivalents = sys.argv[1:] == ['--equivalents']
+    started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='galley-mutations-') as directory:
         target = Path(directory)
         copy_inputs(target)
@@ -174,6 +177,7 @@ def run():
                 survivors += 1
                 status = 'SURVIVED'
             print(f'{mutant["file"]}:{mutant["line"]} {mutant["kind"]}: {status}', flush=True)
+    print(f'Campaign duration: {time.monotonic() - started:.2f} seconds.')
     if check_equivalents:
         print(f'{reviewed} reviewed equivalents passed the full suite.')
         return

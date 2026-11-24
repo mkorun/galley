@@ -1,5 +1,5 @@
 import { fail, span } from './diagnostics.js';
-import { parsePath } from './path.js';
+import { checkPathRoots, parsePath } from './path.js';
 const PRECEDENCE = { '??': 1, '||': 2, '&&': 3, '===': 4, '!==': 4, '>': 4, '<': 4, '>=': 4, '<=': 4 };
 const ORDERED_OPERATORS = ['===', '!==', '>=', '<=', '??', '||', '&&', '>', '<'];
 const splitTopLevel = (raw, separator) => {
@@ -102,7 +102,7 @@ const parsePipe = (raw, at) => {
         const chunk = body.slice(start, end);
         const argAt = span(at.source, at.start + open + 1 + start, at.start + open + 1 + end);
         if (chunk.trim())
-            args.push(parseExpression(chunk, argAt));
+            args.push(parsePiped(chunk, argAt));
         else
             fail('G1104', `Empty argument in pipe ${name}`, argAt);
         start = end + 1;
@@ -167,7 +167,7 @@ const parseCore = (rawInput, atInput) => {
     }
     return parsePath(raw, at);
 };
-export const parseExpression = (rawInput, atInput) => {
+const parsePiped = (rawInput, atInput) => {
     if (!rawInput.includes('|'))
         return parseCore(rawInput, atInput);
     const pipePositions = splitTopLevel(rawInput, '|').filter(i => rawInput[i - 1] !== '|' && rawInput[i + 1] !== '|');
@@ -183,5 +183,26 @@ export const parseExpression = (rawInput, atInput) => {
     }
     const node = { kind: 'pipe', input, pipes, span: atInput };
     return node;
+};
+const checkRoots = (expression) => {
+    if (expression.kind === 'path')
+        checkPathRoots(expression);
+    else if (expression.kind === 'unary')
+        checkRoots(expression.operand);
+    else if (expression.kind === 'binary') {
+        checkRoots(expression.left);
+        checkRoots(expression.right);
+    }
+    else if (expression.kind === 'pipe') {
+        checkRoots(expression.input);
+        for (const pipe of expression.pipes)
+            for (const argument of pipe.args)
+                checkRoots(argument);
+    }
+};
+export const parseExpression = (raw, at) => {
+    const expression = parsePiped(raw, at);
+    checkRoots(expression);
+    return expression;
 };
 //# sourceMappingURL=expression.js.map

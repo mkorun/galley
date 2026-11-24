@@ -1,6 +1,6 @@
 import type { BinaryExpression, Expression, LiteralExpression, PipeCall, PipeExpression, UnaryExpression } from './ast.js'
 import { fail, span } from './diagnostics.js'
-import { parsePath } from './path.js'
+import { checkPathRoots, parsePath } from './path.js'
 import type { SourceSpan } from './types.js'
 
 type Operator = BinaryExpression['operator']
@@ -74,7 +74,7 @@ const parsePipe = (raw: string, at: SourceSpan): PipeCall => {
 	for (const end of [...commaPositions, body.length]) {
 		const chunk = body.slice(start, end)
 		const argAt = span(at.source, at.start + open + 1 + start, at.start + open + 1 + end)
-		if (chunk.trim()) args.push(parseExpression(chunk, argAt))
+		if (chunk.trim()) args.push(parsePiped(chunk, argAt))
 		else fail('G1104', `Empty argument in pipe ${name}`, argAt)
 		start = end + 1
 	}
@@ -121,7 +121,7 @@ const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 	return parsePath(raw, at)
 }
 
-export const parseExpression = (rawInput: string, atInput: SourceSpan): Expression => {
+const parsePiped = (rawInput: string, atInput: SourceSpan): Expression => {
 	if (!rawInput.includes('|')) return parseCore(rawInput, atInput)
 	const pipePositions = splitTopLevel(rawInput, '|').filter(i => rawInput[i - 1] !== '|' && rawInput[i + 1] !== '|')
 	if (!pipePositions.length) return parseCore(rawInput, atInput)
@@ -135,4 +135,20 @@ export const parseExpression = (rawInput: string, atInput: SourceSpan): Expressi
 	}
 	const node: PipeExpression = { kind: 'pipe', input, pipes, span: atInput }
 	return node
+}
+
+const checkRoots = (expression: Expression): void => {
+	if (expression.kind === 'path') checkPathRoots(expression)
+	else if (expression.kind === 'unary') checkRoots(expression.operand)
+	else if (expression.kind === 'binary') { checkRoots(expression.left); checkRoots(expression.right) }
+	else if (expression.kind === 'pipe') {
+		checkRoots(expression.input)
+		for (const pipe of expression.pipes) for (const argument of pipe.args) checkRoots(argument)
+	}
+}
+
+export const parseExpression = (raw: string, at: SourceSpan): Expression => {
+	const expression = parsePiped(raw, at)
+	checkRoots(expression)
+	return expression
 }

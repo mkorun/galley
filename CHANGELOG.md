@@ -3,6 +3,42 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Breaking
+
+- B1: report G3007 with a source location for every bound name the engine cannot bind in strict async JavaScript
+  or the generated code needs as a global (`String`, `Object`, `Array`, `TypeError`, `undefined`). This also refuses `await`
+  without awaiting code and globals used as an item, index or parameter where they previously worked.
+- B1: report G3021 at the second declaration in a generated scope, including expanded partials, snippet parameters,
+  loop metadata and snippet names visible to JS. A snippet callable by `{@js}` may no longer take the name of a
+  parameter of its enclosing snippet. Inner-block and loop-item shadowing remain allowed. Snippet names that
+  `{@js}` cannot call have no generated binding and are exempt from G3007.
+
+- B3: refuse every template tag inside `on*` and `srcdoc` attributes (G3017), in every namespace and ASCII case.
+  Pass handler data through `data-*`; whole static attributes inside blocks remain allowed.
+- B3: check each piece of `srcset` and `imagesrcset` at render (G5001). Relative and allowed-scheme URLs pass,
+  including `https://cdn.example/`; protocol-relative, `data:` and other schemes stop. Static `&` anywhere in a list
+  with a dynamic write is G3015; move query text into an escaped value.
+- B3: for a single URL, a forbidden prefix followed by a raw `&` in the same write now keeps the forbidden-prefix
+  G5001 reason (`a relative one, or one of http:, https:, mailto:, tel:`), rather than becoming `undecided`.
+  The same writes are stopped. For example, `href="{@raw u}"` with `u = "javascript:&x"` still fails.
+
+- B7a: rule 17 refuses escaped values in script/style with G3018, including values in rendered snippets; the
+  diagnostic identifies the value and its render call. Static text and raw/JS output keep their existing rules.
+- B7a: the first path name must be an identifier. Outside script/style, an output that fails only this rule is G3019,
+  always on; other tags report a parse error. Use `$.user-name` for a special data key. Inside script/style such a brace
+  becomes literal text: CSS `{margin:0}` is retained, and a former `{ user-name }` interpolation stays as written.
+
+### Added
+
+- B2: support one `{:else}` fallback for `{#each}`. It renders exactly when the body runs zero times and uses the
+  surrounding bindings, with its own snippet scope. Both paths must preserve their HTML context and delimiter rules.
+
+### Documentation
+
+- B1: document paths as `??` fallbacks.
+
 ## [0.4.0] — 2026-11-20
 
 ### Security

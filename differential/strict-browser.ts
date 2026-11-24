@@ -5,14 +5,14 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export interface BrowserCase { id: string; html: string; kind: 'places' | 'foreign' | 'text'; owner?: string }
-export interface BrowserReading { id: string; places: string[]; urls: string[]; foreign: boolean; text: boolean }
+export interface BrowserReading { id: string; places: string[]; urls: string[]; lists: string[]; foreign: boolean; text: boolean }
 /** Every case gets a new scripting-enabled browsing context. CSP forbids execution and resource loads. */
 export const strictPage = (cases: readonly BrowserCase[]): string => `<!doctype html><meta charset="utf-8"><pre id="result"></pre><script>
 const cases=${JSON.stringify(cases).replace(/</g, '\\u003c')};
 const results=cases.map(item=>{
  const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);
  const root=frame.contentDocument;root.open();root.write(${JSON.stringify('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'">')}+item.html);root.close();
- const places=[],urls=[];let foreign=false,text=false;
+ const places=[],urls=[],lists=[];let foreign=false,text=false;
  const visit=node=>{
   for(const child of node.childNodes){
    if(child.nodeType===3){for(const m of child.data.matchAll(/javascript:M(\\d+)=1 N\\1=2/g))places.push(m[1]+'|text:'+ (node.localName||'#fragment').toLowerCase());if(node.localName?.toLowerCase()===item.owner?.toLowerCase()&&child.data.includes('GALLEY_TEXT<i data-galley-probe>'))text=true;}
@@ -24,11 +24,12 @@ const results=cases.map(item=>{
      for(const m of attr.name.matchAll(/(?:javascript:m|n)(\\d+)/gi))places.push(m[1]+'|name');
      for(const m of attr.value.matchAll(/javascript:M(\\d+)=/g))places.push(m[1]+'|attr:'+child.localName.toLowerCase()+'.'+attr.name);
      if(attr.value.includes('javascript:M')&&['href','src','action','formaction','poster','cite','xlink:href'].includes(attr.name))urls.push(attr.value);
+     if(attr.value.includes('M1=1')&&['srcset','imagesrcset'].includes(attr.name))lists.push(attr.value);
     }
     visit(child);if(child.namespaceURI==='http://www.w3.org/1999/xhtml'&&child.localName==='template')visit(child.content);
    }
   }
- };visit(root);frame.remove();return {id:item.id,places,urls,foreign,text};
+ };visit(root);frame.remove();return {id:item.id,places,urls,lists,foreign,text};
 });
 document.getElementById('result').textContent=btoa(unescape(encodeURIComponent(JSON.stringify(results))));
 </script>`
@@ -37,7 +38,7 @@ export const readStrictOutput = (output: string, cases: readonly BrowserCase[]):
 	const match = /<pre id="result">([A-Za-z0-9+/=]+)<\/pre>/.exec(output)
 	if (!match) throw new Error('Chromium returned no strict observations')
 	const results = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(match[1]!), char => char.charCodeAt(0))))
-	if (!Array.isArray(results) || results.length !== cases.length || results.some((item, index) => !item || item.id !== cases[index]!.id || !Array.isArray(item.places) || !item.places.every((place: unknown) => typeof place === 'string') || !Array.isArray(item.urls) || !item.urls.every((url: unknown) => typeof url === 'string') || typeof item.foreign !== 'boolean' || typeof item.text !== 'boolean')) throw new Error('Malformed strict observations')
+	if (!Array.isArray(results) || results.length !== cases.length || results.some((item, index) => !item || item.id !== cases[index]!.id || !Array.isArray(item.places) || !item.places.every((place: unknown) => typeof place === 'string') || !Array.isArray(item.urls) || !item.urls.every((url: unknown) => typeof url === 'string') || !Array.isArray(item.lists) || !item.lists.every((list: unknown) => typeof list === 'string') || typeof item.foreign !== 'boolean' || typeof item.text !== 'boolean')) throw new Error('Malformed strict observations')
 	return results
 }
 

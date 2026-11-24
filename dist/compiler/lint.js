@@ -1,10 +1,30 @@
+import { scriptedSnippets } from './analysis.js';
+import { locate } from './diagnostics.js';
 /** Names used by generated runtime calls must not be shadowed by template declarations. */
-const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError']);
+const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined']);
 export const lintAst = (ast, options = {}) => {
     const diagnostics = [];
     const declarations = new Set();
     const used = new Set();
     const duplicate = new Set();
+    const scripted = scriptedSnippets(ast.children);
+    const invalidNames = new Map();
+    const binding = (name, at) => {
+        if (!invalidNames.has(name)) {
+            let invalid = GENERATED_GLOBALS.has(name);
+            try {
+                new Function(`return async function(){'use strict';let ${name};}`);
+            }
+            catch (error) {
+                if (!(error instanceof SyntaxError))
+                    throw error;
+                invalid = true;
+            }
+            invalidNames.set(name, invalid);
+        }
+        if (invalidNames.get(name))
+            report({ code: 'G3007', severity: 'error', message: `The name ${name} cannot be bound by the generated code`, span: at, help: `Choose a name allowed in strict async JavaScript outside ${[...GENERATED_GLOBALS].join(', ')}.` });
+    };
     const report = (diagnostic) => diagnostics.push(diagnostic);
     // parseCore builds pipe inputs and unary/binary operands without pipes; only arguments can nest pipes.
     const expression = (expr) => {
@@ -25,7 +45,11 @@ export const lintAst = (ast, options = {}) => {
         }
         return undefined;
     };
-    const visit = (nodes, parent, sameScope = false) => {
+    const declaration = (sites) => sites.map((at, index) => {
+        const { line, column } = locate(at.source, at.start);
+        return `${index < sites.length - 1 ? at.source.text.slice(at.start, at.end) + ' at ' : ''}${at.source.id}:${line}:${column}`;
+    }).join(' -> ');
+    const visit = (nodes, parent, sameScope = false, names = new Map(), partials = []) => {
         const local = sameScope ? parent.snippets : new Map();
         const declare = (items) => {
             for (const node of items) {
@@ -46,10 +70,15 @@ export const lintAst = (ast, options = {}) => {
         };
         if (!sameScope)
             declare(nodes);
-        const scope = sameScope ? parent : { parent, snippets: local };
+        const scope = sameScope ? parent : { parent, snippets: local, names };
         for (const node of nodes) {
-            if ((node.kind === 'const' || node.kind === 'snippet') && GENERATED_GLOBALS.has(node.name))
-                report({ code: 'G3007', severity: 'error', message: `The name ${node.name} is needed by the generated code`, span: node.span });
+            if (node.kind === 'const' || (node.kind === 'snippet' && scripted.has(node))) {
+                binding(node.name, node.span);
+                const sites = [...partials, node.span], previous = scope.names.get(node.name);
+                if (previous)
+                    report({ code: 'G3021', severity: 'error', message: `The name ${node.name} is declared twice in the same generated scope: ${declaration(previous)} and ${declaration(sites)}`, span: node.span, help: 'Use distinct names or put the declarations or partial inclusions in separate blocks.' });
+                scope.names.set(node.name, sites);
+            }
             switch (node.kind) {
                 case 'output':
                     expression(node.expression);
@@ -63,19 +92,30 @@ export const lintAst = (ast, options = {}) => {
                     for (const branch of node.branches) {
                         if (branch.condition)
                             expression(branch.condition);
-                        visit(branch.children, scope);
+                        visit(branch.children, scope, false, undefined, partials);
                     }
                     break;
                 case 'each':
-                    visit(node.children, scope);
+                    binding(node.item, node.span);
+                    if (node.index)
+                        binding(node.index, node.span);
+                    visit(node.children, scope, false, new Map(['length', 'isFirst', 'isLast'].map(name => [name, [...partials, node.span]])), partials);
+                    if (node.fallback)
+                        visit(node.fallback, scope, false, undefined, partials);
                     break;
                 case 'partial':
                     if (node.children)
-                        visit(node.children, scope, true);
+                        visit(node.children, scope, true, undefined, [...partials, node.span]);
                     break;
-                case 'snippet':
-                    visit(node.children, scope);
+                case 'snippet': {
+                    const names = new Map();
+                    if (node.param) {
+                        binding(node.param, node.span);
+                        names.set(node.param, [...partials, node.span]);
+                    }
+                    visit(node.children, scope, false, names, partials);
                     break;
+                }
                 case 'render': {
                     const snippet = resolve(scope, node.name);
                     if (snippet)

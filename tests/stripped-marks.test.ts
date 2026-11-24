@@ -28,10 +28,10 @@ describe('a value with the marks of stripEmptyMeta', () => {
 })
 
 describe('what a template may not do to the generated code', () => {
-	test('a snippet or a constant may not take a global the generated code calls', async () => {
-		for (const name of ['String', 'Object', 'Array', 'TypeError']) {
-			await expect(render(`{#snippet ${name}(x)}{/snippet}`)).rejects.toThrow(/needed by the generated code/)
-			await expect(render(`{@const ${name} = 1}`)).rejects.toThrow(/needed by the generated code/)
+	test('a scripted snippet or a constant may not take a global the generated code reads', async () => {
+		for (const name of ['String', 'Object', 'Array', 'TypeError', 'undefined']) {
+			await expect(render(`{#snippet ${name}(x)}{/snippet}{@js}return ''{@js}`, {}, { allowCode: true })).rejects.toThrow(/cannot be bound by the generated code/)
+			await expect(render(`{@const ${name} = 1}`)).rejects.toThrow(/cannot be bound by the generated code/)
 		}
 	})
 

@@ -1,7 +1,7 @@
 /** Mechanical compiler mutations. Uses the installed TypeScript parser, never text guesses about expressions. */
 import ts from 'typescript'
 const mutants: { file: string; start: number; end: number; before: string; after: string; kind: string; line: number; id: string }[] = []
-for (const file of ['compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts']) {
+for (const file of ['compiler/analysis.ts', 'compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts', 'compiler/expression.ts', 'compiler/path.ts', 'compiler/parser.ts']) {
 	const source = await Bun.file(file).text()
 	const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 	const add = (start: number, end: number, after: string, kind: string) => {
@@ -25,12 +25,21 @@ for (const file of ['compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.
 	const change = (node: ts.Node, after: string, kind: string) => add(node.getStart(ast), node.end, after, kind)
 	const flip = (node: ts.Node) => change(node, `!(${node.getText(ast)})`, 'predicate')
 	// URL checkpoint generation: liveness, writes, literal feeds, attribute ends and snippet checkpoints.
-	const regions = file.endsWith('codegen.ts') ? [
+	const regions = file.endsWith('analysis.ts') ? [[source.indexOf('export const scriptedSnippets'), source.indexOf('export const analyze')]] : file.endsWith('codegen.ts') ? [
 		[source.indexOf('const live ='), source.indexOf("// '$' is seeded")],
 	] : file.endsWith('lexer.ts') ? [
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
-	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : [[0, source.length]]
+	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : file.endsWith('parser.ts') ? [
+		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
+		[source.indexOf('export const braceDiagnostic'), source.indexOf('const expressionSpan')],
+		[source.indexOf("if (error.diagnostic.code === 'G1007')"), source.indexOf('// ADR-015:')],
+		// B2: which continuation ends a branch, and the each fallback's parse and source span.
+		[source.indexOf("if ((token.kind === 'block-close'"), source.indexOf('\n\t\t\tcursor++')],
+		[source.indexOf("const result = parseChildren('each', 'each')"), source.indexOf('const parseSnippet')],
+		// Collection paths use the same first-name check as complete expressions.
+		[source.indexOf('try { collection = parsePath'), source.indexOf("const result = parseChildren('each', 'each')")],
+	] : [[0, source.length]]
 	if (regions.some(([a,b]) => a! < 0 || b! <= a!)) throw new Error(`Unknown checkpoint region in ${file}`)
 	const visit = (node: ts.Node) => {
 		if (!regions.some(([a,b]) => node.getStart(ast) >= a! && node.end <= b!)) { ts.forEachChild(node, visit); return }
@@ -116,6 +125,15 @@ for (const file of ['compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.
 		ts.forEachChild(node, visit)
 	}
 	visit(ast)
+}
+// Repeated statements in the same function need stable occurrence numbers, independent of source line numbers.
+const occurrences = new Map<string, typeof mutants>()
+for (const mutant of mutants) {
+	const group = occurrences.get(mutant.id) ?? []
+	group.push(mutant); occurrences.set(mutant.id, group)
+}
+for (const group of occurrences.values()) if (group.length > 1) {
+	for (const [index, mutant] of group.entries()) mutant.id = JSON.stringify([...JSON.parse(mutant.id), index])
 }
 if (new Set(mutants.map(mutant => mutant.id)).size !== mutants.length) throw new Error('Ambiguous mutation context')
 console.log(JSON.stringify(mutants))
