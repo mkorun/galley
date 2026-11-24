@@ -3,7 +3,7 @@ import galley from '../index.js'
 import { UrlPrefix } from '../compiler/url.js'
 
 type Options = NonNullable<Parameters<typeof galley>[1]>
-const render = async (source: string, data: object = {}, options: Options = {}): Promise<string> => (await galley(source, options)).render(data, {})
+const render = async (source: string, data: object = {}, options: Options = {}): Promise<string> => (await galley(source, options)).render(data)
 const refuse = async (source: string, code: string, options: Options = {}): Promise<void> => {
 	await expect(galley(source, options), source).rejects.toThrow(code)
 }

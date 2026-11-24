@@ -95,7 +95,7 @@ describe('{@js} blocks', () => {
 			includes: { import: () => Promise.resolve(''), basedir: '.' },
 			allowCode: true,
 		})
-		const result = tpl.render({}, {})
+		const result = tpl.render({})
 		expect(result).toBeInstanceOf(Promise)
 		expect(await result).toBe('x')
 	})

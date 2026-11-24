@@ -13,7 +13,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 COPY_FILES = ['index.ts', 'types.ts', 'util.ts', 'bunfig.toml', 'tsconfig.json', 'check.sh']
 # The generator owns the mutated-file list; the focused test selection is a separate execution concern.
-TESTS = ['tests/' + name for name in ['reader-names.test.ts', 'expression-path.test.ts', 'each-else.test.ts', 'attribute-policy.test.ts', 'bindings.test.ts', 'strict-acceptor.test.ts', 'mechanical-reader.test.ts', 'second-correction.test.ts', 'url-static-start.test.ts', 'url-static-suffix.test.ts', 'url-end-check.test.ts', 'mutation-flow.test.ts', 'lint-mutations.test.ts', 'third-correction.test.ts', 'fourth-correction.test.ts', 'growth-semantics.test.ts', 'config-regression.test.ts', 'comment-search.test.ts', 'lint-async.test.ts', 'context-model.test.ts', 'url-attributes.test.ts', 'review-findings.test.ts', 'stripped-marks.test.ts', 'compiler.test.ts', 'loops.test.ts', 'snippets.test.ts']]
+TESTS = ['tests/' + name for name in ['metadata-collections.test.ts', 'position.test.ts', 'snippet-parameters.test.ts', 'boolean-filters.test.ts', 'filter-registry.test.ts', 'reader-names.test.ts', 'expression-path.test.ts', 'each-else.test.ts', 'attribute-policy.test.ts', 'bindings.test.ts', 'strict-acceptor.test.ts', 'mechanical-reader.test.ts', 'second-correction.test.ts', 'url-static-start.test.ts', 'url-static-suffix.test.ts', 'url-end-check.test.ts', 'mutation-flow.test.ts', 'lint-mutations.test.ts', 'third-correction.test.ts', 'fourth-correction.test.ts', 'growth-semantics.test.ts', 'config-regression.test.ts', 'comment-search.test.ts', 'lint-async.test.ts', 'context-model.test.ts', 'url-attributes.test.ts', 'review-findings.test.ts', 'stripped-marks.test.ts', 'compiler.test.ts', 'loops.test.ts', 'snippets.test.ts']]
 FAILURE = re.compile(r'^\(fail\) (.+?)(?: \[[0-9.]+ms\])?$', re.MULTILINE)
 PASS = re.compile(r'^\s*[1-9][0-9]* pass\s*$', re.MULTILINE)
 ZERO_FAILURES = re.compile(r'^\s*0 fail\s*$', re.MULTILINE)
@@ -83,8 +83,8 @@ def generate_mutations(target):
             if not isinstance(mutant.get('after'), str) or any(type(mutant.get(key)) is not int for key in ['start', 'end', 'line']):
                 raise ValueError('missing or invalid replacement, offsets or line')
             path = Path(mutant['file'])
-            if path.is_absolute() or '..' in path.parts or len(path.parts) < 2 or path.parts[0] != 'compiler':
-                raise ValueError('mutant file must be inside compiler')
+            if path.is_absolute() or '..' in path.parts or (str(path) != 'util.ts' and (len(path.parts) < 2 or path.parts[0] != 'compiler')):
+                raise ValueError('mutant file must be inside compiler or be util.ts')
             original = (target / path).read_text(encoding='utf-8')
             if not (0 <= mutant['start'] < mutant['end'] <= len(original)) or mutant['line'] < 1:
                 raise ValueError('invalid mutant offsets or line')

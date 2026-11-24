@@ -19,6 +19,8 @@ declare const util: {
     length: (val: unknown[] | string) => number;
     round: (n: number, decimals?: number) => number;
     number: (n: number, locale?: string) => string;
+    oneOf: (value: unknown, ...candidates: unknown[]) => boolean;
+    plural: (count: number, locale: string, forms: Partial<Record<Intl.LDMLPluralRule, string>>) => string;
     stripWhitespace: (val: string) => string;
 };
 export default util;

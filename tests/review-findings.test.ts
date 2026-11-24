@@ -1,13 +1,12 @@
 // One test per finding of the review of the context model (P1 1 to P3 12, G-12 to G-18). Each holds the review's reproductions.
 import { expect, test } from 'bun:test'
 import galley, { GalleyDiagnosticError, lint } from '../index.js'
-import util from '../util.js'
 import { render } from './helpers.js'
 
 const stop = async (template: string, data: object, prefix: string, options: Parameters<typeof galley>[1] = {}) => {
 	const compiled = await galley(template, options)
 	let message = 'rendered'
-	try { await compiled.render(data, util) }
+	try { await compiled.render(data) }
 	catch (error) { message = (error as Error).message }
 	expect(message).toStartWith(`G5001: href=${JSON.stringify(prefix)} is no URL`)
 }
@@ -100,7 +99,7 @@ test('a name the template ends in is an incomplete root, not a block that runs o
 
 test('P3 11 (G-18): lint keeps its warnings beside a context error, and reads contexts around a partial', async () => {
 	const codes = async (source: string, options: Parameters<typeof lint>[1] = {}) => (await lint(source, { ...options, includes: { import: async () => '' } })).map(item => item.code)
-	expect(await codes('{#snippet unused()}x{/snippet}{@raw y | unknownPipe}<a { z }>', { knownFilters: new Set() })).toEqual(['G3001', 'G3002', 'G3006', 'G3008'])
+	expect(await codes('{#snippet unused()}x{/snippet}{@raw y | unknownPipe}<a { z }>')).toEqual(['G3001', 'G3002', 'G3006'])
 	expect(await codes('<a { x }>{@partial p.sort}')).toEqual(['G3008'])
 	expect(await codes('{@partial p.sort}<a href={ x }>')).toEqual(['G3008'])
 	// G-26: use resolved empty partials; unresolved partials defer context checks.

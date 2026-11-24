@@ -26,12 +26,23 @@ assert any(m['kind'] == 'drop returned value' for m in original)
 assert any(m['kind'] == 'drop generated declaration ,$$indent=0' for m in original)
 assert any(m['file'] == 'compiler/lint.ts' for m in original)
 for file, statements in {
-    'compiler/expression.ts': ['checkRoots(expression.left)', 'checkRoots(expression.input)'],
+    'util.ts': ['candidate === value', 'pluralRules.size < 100', 'pluralRules.set(locale, rules)'],
+    'compiler/filters.ts': ["'knownFilters' in options", "typeof filter !== 'function'", 'Object.create(null)', 'Object.freeze(filters)'],
+    'compiler/stringify.ts': ['warnOnFailure = previous'],
+    'compiler/analysis.ts': ['collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)'],
+    'compiler/expression.ts': ['checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0'],
     'compiler/path.ts': ['checkPathRoots(segment.value)'],
-    'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)'],
+    'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)', 'checkRoots(argument)', 'seen.add(param)'],
 }.items():
     for statement in statements:
         assert any(m['file'] == file and statement in m['before'] for m in original), statement
+for kind in ['cache bound below', 'cache bound above', 'registry prototype', 'registry freeze', 'pipe expression span']:
+    assert any(m['kind'] == kind for m in original), kind
+assert sum(m['kind'] == 'pipe name span' for m in original) == 2
+assert sum(m['kind'] == 'pipe grouping help' for m in original) == 2
+assert any(m['file'] == 'compiler/codegen.ts' and m['kind'] == 'drop generated one-based offset' for m in original)
+for name in ['length', 'isFirst', 'isLast', 'position']:
+    assert any(m['file'] == 'compiler/ast.ts' and m['kind'] == f"set '{name}'" for m in original), name
 assert any(m['file'] == 'compiler/index.ts' and 'lint' in json.loads(m['id'])[1] for m in original)
 for statement in ['scope.add(name);', 'localNames.push(name)', 'declare(name)', 'declare(node.name);', 'bindings.push(node.index)', 'scope.delete(name)']:
     assert any(m['file'] == 'compiler/codegen.ts' and statement in m['before'] for m in original), statement

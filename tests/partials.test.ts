@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import galley from './compiler'
-import util from '../util'
 
 // In-memory virtual filesystem — maps path → template source
 const withFiles = (files: Record<string, string>) => ({
@@ -20,7 +19,7 @@ const render = async (
 	files: Record<string, string> = {},
 ) => {
 	const tpl = await galley(template, { includes: withFiles(files) })
-	const result = tpl.render(data, util)
+	const result = tpl.render(data)
 	if (result instanceof Promise) return result
 	return result as string
 }
@@ -123,7 +122,7 @@ describe('HTML comment stripping', () => {
 
 	const compile = async (template: string) => {
 		const tpl = await galley(template, { includes: noPartials })
-		const result = tpl.render({}, util)
+		const result = tpl.render({})
 		if (result instanceof Promise) return result
 		return result as string
 	}

@@ -51,8 +51,8 @@ test('B7a: later path names stay broad; every first path name is checked after t
 })
 
 test('B7a: a first-name failure before a less-than operator names the brace fix', async () => {
-	for (const operator of ['<', '<=']) {
-		const source = `<p>{ user-name ${operator} a }</p>`
+	for (const operator of ['<', '<=']) for (const owner of ['p', 'svg><title', 'math><textarea']) {
+		const source = `<${owner}>{ user-name ${operator} a }`
 		const error = await errorAt(source, 'G3019', source.indexOf('{'))
 		expect(error.diagnostic.help).toContain('Write \\{')
 		expect(error.diagnostic.help).toContain('$.')

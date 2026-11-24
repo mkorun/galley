@@ -2,6 +2,7 @@ import { analyze, contains } from './analysis.js';
 import { readContexts } from './context.js';
 import { UrlPrefix } from './url.js';
 import { stringify, filterWithWarnings } from './stringify.js';
+import { filterRegistry } from './filters.js';
 import { generate } from './codegen.js';
 import { GalleyDiagnosticError } from './diagnostics.js';
 import { lintAst } from './lint.js';
@@ -58,11 +59,12 @@ const stripStatic = (nodes, root = false) => nodes.map((node, index) => {
 });
 /** Lint uses the compiler's reader; unresolved partials preserve their entry context. */
 export async function lint(template, options = {}) {
+    const filters = filterRegistry(options);
     const diagnostics = [];
     try {
         const parsed = parse({ id: options.sourceId ?? '<template>', text: template });
         const ast = analyze(options.includes ? await expandPartials(parsed, options) : parsed);
-        diagnostics.push(...lintAst(ast, options));
+        diagnostics.push(...lintAst(ast, options, filters));
         if (!diagnostics.some(item => item.severity === 'error')) {
             const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
             readContexts(prepared);
@@ -76,24 +78,22 @@ export async function lint(template, options = {}) {
     return diagnostics;
 }
 export default async function galley(template = '', options = {}) {
+    const filters = filterRegistry(options);
     const source = { id: options.sourceId ?? '<template>', text: template };
     const initial = parse(source);
     const parsed = await expandPartials(initial, options);
     const ast = analyze(parsed);
-    const diagnostics = lintAst(ast, {
-        allowCode: options.allowCode === true,
-        ...(options.knownFilters ? { knownFilters: options.knownFilters } : {}),
-    });
+    const diagnostics = lintAst(ast, options, filters);
     const fatal = diagnostics.find(diagnostic => diagnostic.severity === 'error');
     if (fatal)
         throw new GalleyDiagnosticError(fatal);
     const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
     const program = generate(readContexts(prepared), options);
     if (program.async) {
-        const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', `return async function($,$$filters){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings);
+        const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places);
         return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
     }
-    const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', `return function($,$$filters){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings);
+    const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places);
     return { async: false, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
 }
 //# sourceMappingURL=index.js.map

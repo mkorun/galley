@@ -294,6 +294,16 @@ class CampaignTests(unittest.TestCase):
                 self.campaign_fails('mutant list')
                 self.assertEqual(self.calls, [])
 
+    def test_mutation_boundary_allows_util_but_no_other_root_or_test_file(self):
+        self.mutations = [dict(self.mutant, file='util.ts', before='input', end=5)]
+        self.assertEqual(driver.generate_mutations(self.fixture), self.mutations)
+        for name in ['index.ts', 'tests/example.test.ts', 'util/other.ts', 'compiler/../util.ts']:
+            with self.subTest(file=name):
+                self.mutations = [dict(self.mutant, file=name, before='input', end=5)]
+                with self.assertRaisesRegex(SystemExit, 'mutant file must be inside compiler or be util.ts'):
+                    driver.generate_mutations(self.fixture)
+        self.assertEqual(self.calls, [])
+
     def test_malformed_generation_and_missing_bun_fail(self):
         invoke = self.invoke
         for fault in ['bad json', 'failed generator', 'missing bun']:

@@ -1,7 +1,8 @@
-import type { Expression, HtmlSlot, PathExpression, TemplateAst, TemplateNode, TextNode, ValueRecord } from './ast.js'
+import type { LoopMetadata, Expression, HtmlSlot, PathExpression, TemplateAst, TemplateNode, TextNode, ValueRecord } from './ast.js'
+import type { SourceSpan } from './types.js'
 import { fail } from './diagnostics.js'
 
-export interface GeneratedProgram { readonly body: string; readonly async: boolean }
+export interface GeneratedProgram { readonly body: string; readonly async: boolean; readonly places: readonly SourceSpan[] }
 
 const escapeJs = (value: string): string => /[\\'\n\r\u2028\u2029]/.test(value)
 	? value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r')
@@ -31,18 +32,21 @@ const pathCode = (path: PathExpression, scope: ReadonlySet<string>): string => {
 	return code
 }
 
-const expressionCode = (expression: Expression, scope: ReadonlySet<string>): string => {
-	switch (expression.kind) {
-		case 'path': return pathCode(expression, scope)
-		case 'literal': return expression.raw
-		case 'unary': return `!(${expressionCode(expression.operand, scope)})`
-		case 'binary': return `(${expressionCode(expression.left, scope)}${expression.operator}${expressionCode(expression.right, scope)})`
-		case 'pipe': return expression.pipes.reduce((input, pipe) =>
-			`$$filter('${pipe.name}',$$filters.${pipe.name},${input}${pipe.args.map(arg => `,${expressionCode(arg, scope)}`).join('')})`, expressionCode(expression.input, scope))
-	}
-}
 
 export const generate = (ast: TemplateAst, options: { readonly allowCode?: boolean; readonly strip?: boolean; readonly stripEmptyMeta?: boolean; readonly debug?: boolean } = {}): GeneratedProgram => {
+	const places: SourceSpan[] = []
+	const place = (at: SourceSpan): number => { places.push(at); return places.length - 1 }
+	const expressionCode = (expression: Expression, scope: ReadonlySet<string>): string => {
+		switch (expression.kind) {
+			case 'path': return pathCode(expression, scope)
+			case 'literal': return expression.raw
+			case 'unary': return `!(${expressionCode(expression.operand, scope)})`
+			case 'binary': return `(${expressionCode(expression.left, scope)}${expression.operator}${expressionCode(expression.right, scope)})`
+			case 'pipe': return expression.pipes.reduce((input, pipe) =>
+				`$$filter(${place(pipe.span)},'${pipe.name}',${input}${pipe.args.map(arg => `,${expressionCode(arg, scope)}`).join('')})`, expressionCode(expression.input, scope))
+		}
+	}
+
 	const strip = options.stripEmptyMeta !== false
 	const hasMetadata = (nodes: readonly TemplateNode[]): boolean => nodes.some(node => {
 		if (node.kind === 'text') return node.records?.some(record => record.kind === 'tag-open' && record.dynamic) === true
@@ -53,8 +57,8 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 	})
 	const trackIndent = strip && hasMetadata(ast.children)
 	// $$url: the prefix of the URL value being written. $$tag: the <meta> or <link> start tag being written; $$meta: its target value.
-	let body = "'use strict';$??={};let $$='',$$url=null,$$meta=null,$$tag=null,$$indent=0,$$skipNewline=false;"
-	body += `const $$str=v=>v==null?'':$$stringify(v,${options.debug === true}),$$filter=(n,f,...a)=>{if(typeof f!=='function')throw new TypeError('Unknown filter '+n);return $$filterWithWarnings(${options.debug === true},f,...a);};`
+	let body = "'use strict';if(arguments.length>1)throw new TypeError('Pass filters in options.filters, not render(data, filters)');$??={};let $$='',$$url=null,$$meta=null,$$tag=null,$$indent=0,$$skipNewline=false;"
+	body += `const $$str=v=>v==null?'':$$stringify(v,${options.debug === true}),$$filter=(p,n,...a)=>$$filterWithWarnings(${options.debug === true},n,$$places[p],$$filters[n],...a);`
 	if (options.debug) body += '// [galley] AST compiler debug output\n'
 	let sequence = 0
 
@@ -156,9 +160,9 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 				}
 				case 'each': {
 					const id = ++sequence, collection = `$$l${id}`, array = `$$a${id}`, count = `$$c${id}`, empty = `$$e${id}`
-					const metadata = node.metadata ?? new Set<'length' | 'isFirst' | 'isLast'>()
-					const needsCount = metadata.size > 0
-					const needsCounter = metadata.has('isFirst') || metadata.has('isLast')
+					const metadata = node.metadata ?? new Set<LoopMetadata>()
+					const needsCount = metadata.has('length') || metadata.has('isLast')
+					const needsCounter = metadata.has('isFirst') || metadata.has('isLast') || metadata.has('position')
 					body += `{const ${collection}=${pathCode(node.collection, scope)};${node.fallback ? `let ${empty}=true;` : ''}if(${collection}){const ${array}=Array.isArray(${collection});`
 					if (needsCount) body += `const ${count}=${array}?${collection}.length:Object.keys(${collection}).length;`
 					const bindings = [node.item, ...metadata]; if (node.index) bindings.push(node.index)
@@ -166,6 +170,7 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					if (node.index) body += `for(const [${node.index},${node.item}] of ${array}?${collection}.entries():Object.entries(${collection})){`
 					else body += `for(const ${node.item} of (${array}?${collection}:Object.values(${collection}))){`
 					if (node.fallback) body += `${empty}=false;`
+					if (metadata.has('position')) body += `const position=$$n${id}+1;`
 					if (metadata.has('length')) body += `const length=${count};`
 					if (metadata.has('isFirst')) body += `const isFirst=$$n${id}===0;`
 					if (metadata.has('isLast')) body += `const isLast=$$n${id}===${count}-1;`
@@ -175,20 +180,20 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					if (node.fallback) {
 						body += `if(${empty}){`
 						emitNodes(node.fallback, scope, buffer)
-						body += '}' // fallback branch
+						body += '}'
 					}
-					body += '}' // collection scope
+					body += '}'
 					break
 				}
 				case 'snippet': {
 					for (const variant of node.variants ?? []) {
 						const snippetBuffer = `$$s${++sequence}`
-						body += `function ${variant.name}(${node.param ?? '$$unused'},$$url,$$meta){let ${snippetBuffer}='',$$tag=null,$$indent=0,$$skipNewline=false;`
-						emitNodes(variant.children, scope, snippetBuffer, node.param ? [node.param] : [])
+						body += `function ${variant.name}(${[...node.params, '$$url', '$$meta'].join(',')}){let ${snippetBuffer}='',$$tag=null,$$indent=0,$$skipNewline=false;`
+						emitNodes(variant.children, scope, snippetBuffer, node.params)
 						body += `return ${snippetBuffer};}`
 					}
 					// {@js} calls the snippet as ordinary content. It hands over no value that is being written.
-					if (node.js) body += `function ${node.name}(v){return ${node.js}(v);}`
+					if (node.js) body += `function ${node.name}(...$$args){if($$args.length!==${node.params.length})throw new TypeError('Snippet ${node.name} takes ${node.params.length} argument${node.params.length === 1 ? '' : 's'}, JavaScript passes '+$$args.length);return ${node.js}(...$$args);}`
 					break
 				}
 				case 'render': {
@@ -197,7 +202,7 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 					const checkpoint = `$$check${sequence}`
 					if (node.slot?.url) body += `{const ${checkpoint}=$$url.checkpoints;`
 					else body += '{'
-					body += `const ${value}=${node.specialization ?? node.name}(${node.argument ? expressionCode(node.argument, scope) : 'undefined'},$$url,$$meta);`
+					body += `const ${value}=${node.specialization ?? node.name}(${[...node.arguments.map(argument => expressionCode(argument, scope)), '$$url', '$$meta'].join(',')});`
 					body += `${written(node.slot, value, false, false, `$$url.checkpoints!==${checkpoint}`)}${buffer}+=${value};${trackIndent ? '$$indent=0;$$skipNewline=false;' : ''}}`
 					break
 				}
@@ -215,5 +220,5 @@ export const generate = (ast: TemplateAst, options: { readonly allowCode?: boole
 	// addresses the data parameter itself, not a property literally named "$".
 	emitNodes(ast.children, new Set(['$']), '$$')
 	body += 'return $$;'
-	return { body, async: options.allowCode === true }
+	return { body, async: options.allowCode === true, places }
 }

@@ -49,7 +49,7 @@ export const rule17Family = async () => {
 		}
 		accepted++
 		if (item.refusal) { failures.push({ id: item.id, detail: `Missing ${item.refusal}` }); continue }
-		const html = await template.render({ value: MARKER, 'user-name': MARKER, xs: [] }, {})
+		const html = await template.render({ value: MARKER, 'user-name': MARKER, xs: [] })
 		if (html !== item.expected) failures.push({ id: item.id, detail: 'Unexpected rendered bytes' })
 		pages.push({ id: item.id, html, kind: 'places' }); places.set(item.id, item.place)
 	}

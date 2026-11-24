@@ -1,7 +1,7 @@
 /** Mechanical compiler mutations. Uses the installed TypeScript parser, never text guesses about expressions. */
 import ts from 'typescript'
 const mutants: { file: string; start: number; end: number; before: string; after: string; kind: string; line: number; id: string }[] = []
-for (const file of ['compiler/analysis.ts', 'compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts', 'compiler/expression.ts', 'compiler/path.ts', 'compiler/parser.ts']) {
+for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compiler/stringify.ts', 'compiler/analysis.ts', 'compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts', 'compiler/expression.ts', 'compiler/path.ts', 'compiler/parser.ts']) {
 	const source = await Bun.file(file).text()
 	const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 	const add = (start: number, end: number, after: string, kind: string) => {
@@ -25,12 +25,27 @@ for (const file of ['compiler/analysis.ts', 'compiler/context.ts', 'compiler/url
 	const change = (node: ts.Node, after: string, kind: string) => add(node.getStart(ast), node.end, after, kind)
 	const flip = (node: ts.Node) => change(node, `!(${node.getText(ast)})`, 'predicate')
 	// URL checkpoint generation: liveness, writes, literal feeds, attribute ends and snippet checkpoints.
-	const regions = file.endsWith('analysis.ts') ? [[source.indexOf('export const scriptedSnippets'), source.indexOf('export const analyze')]] : file.endsWith('codegen.ts') ? [
+	const regions = file.endsWith('ast.ts') ? [
+		[source.indexOf('export const LOOP_METADATA'), source.indexOf('export interface PathSegment')],
+	] : file === 'util.ts' ? [
+		[source.indexOf('const oneOf'), source.indexOf('// ── stripWhitespace')],
+	] : file.endsWith('stringify.ts') ? [
+		[source.indexOf('export const filterWithWarnings'), source.length],
+	] : file.endsWith('analysis.ts') ? [
+		[source.indexOf('const collectExpressionMetadata'), source.indexOf('/** Whether')],
+		[source.indexOf('export const scriptedSnippets'), source.indexOf('export const analyze')],
+		[source.indexOf("else if (node.kind === 'render')"), source.indexOf("else if (node.kind === 'if')", source.indexOf('export const analyze'))],
+		[source.indexOf('if (metadata) collectExpressionMetadata(node.collection'), source.indexOf('const ownMetadata')],
+	] : file.endsWith('codegen.ts') ? [
+		[source.indexOf('const places:'), source.indexOf('const strip =')],
+		[source.indexOf('let body ='), source.indexOf('let sequence =')],
 		[source.indexOf('const live ='), source.indexOf("// '$' is seeded")],
 	] : file.endsWith('lexer.ts') ? [
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
 	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : file.endsWith('parser.ts') ? [
+		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
+		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
 		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
 		[source.indexOf('export const braceDiagnostic'), source.indexOf('const expressionSpan')],
 		[source.indexOf("if (error.diagnostic.code === 'G1007')"), source.indexOf('// ADR-015:')],
@@ -38,6 +53,7 @@ for (const file of ['compiler/analysis.ts', 'compiler/context.ts', 'compiler/url
 		[source.indexOf("if ((token.kind === 'block-close'"), source.indexOf('\n\t\t\tcursor++')],
 		[source.indexOf("const result = parseChildren('each', 'each')"), source.indexOf('const parseSnippet')],
 		// Collection paths use the same first-name check as complete expressions.
+		[source.indexOf('for (const name of [item, index])'), source.indexOf('if (index === item)')],
 		[source.indexOf('try { collection = parsePath'), source.indexOf("const result = parseChildren('each', 'each')")],
 	] : [[0, source.length]]
 	if (regions.some(([a,b]) => a! < 0 || b! <= a!)) throw new Error(`Unknown checkpoint region in ${file}`)
@@ -63,12 +79,24 @@ for (const file of ['compiler/analysis.ts', 'compiler/context.ts', 'compiler/url
 		if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) change(node, node.operand.getText(ast), 'negation')
 		if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) change(node, node.kind === ts.SyntaxKind.TrueKeyword ? 'false' : 'true', 'boolean')
 		if (ts.isCallExpression(node) && node.expression.getText(ast) === 'Math.max' && node.arguments.length === 2) change(node, node.arguments[1]!.getText(ast), 'remove clamp')
+		// Registry construction and source spans are observable through the public compiler too.
+		if (file === 'compiler/filters.ts' && ts.isCallExpression(node)) {
+			if (node.expression.getText(ast) === 'Object.create') change(node, '{}', 'registry prototype')
+			if (node.expression.getText(ast) === 'Object.freeze') change(node, node.arguments[0]!.getText(ast), 'registry freeze')
+		}
+		if (file === 'compiler/expression.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'pipeOperatorHelp') change(node, 'undefined', 'pipe grouping help')
+		if (file === 'util.ts' && ts.isNumericLiteral(node) && node.text === '100') {
+			change(node, '99', 'cache bound below'); change(node, '101', 'cache bound above')
+		}
+		if (file === 'compiler/expression.ts' && ts.isPropertyAssignment(node) && node.name.getText(ast) === 'span' && node.initializer.getText(ast) === 'at' && node.parent.parent.getText(ast).startsWith('return { name,')) change(node.initializer, 'atInput', 'pipe name span')
+		if (file === 'compiler/lint.ts' && ts.isPropertyAssignment(node) && node.name.getText(ast) === 'span' && node.initializer.getText(ast) === 'expr.span') change(node.initializer, 'input.span', 'pipe expression span')
 		if (ts.isArrayLiteralExpression(node) && node.elements.length && node.elements.every(ts.isStringLiteral)) {
 			for (const member of node.elements) change(node, `[${node.elements.filter(x => x !== member).map(x => x.getText(ast)).join(', ')}]`, `set ${member.getText(ast)}`)
 		}
 		// Comparisons inside generated JavaScript live in template/string token text rather than TS expressions.
 		if (file.endsWith('codegen.ts') && (ts.isStringLiteral(node) || ts.isTemplateLiteralToken(node))) {
 			const raw = node.getText(ast)
+			for (const match of raw.matchAll(/\+1\b/g)) change(node, raw.slice(0, match.index) + raw.slice(match.index! + 2), 'drop generated one-based offset')
 			for (const match of raw.matchAll(/,\$\$[A-Za-z0-9_]+=(?:null|0|false)(?=[,;])/g)) change(node, raw.slice(0, match.index) + raw.slice(match.index! + match[0].length), `drop generated declaration ${match[0]}`)
 			const inverse: Record<string,string> = { '!==': '===', '===': '!==', '!=': '==', '==': '!=', '>=': '<', '<=': '>', '>': '<=', '<': '>=' }
 			for (const match of raw.matchAll(/!==|===|!=|==|>=|<=|>|</g)) {

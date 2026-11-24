@@ -8,7 +8,7 @@ import { render, countUrlReads } from './helpers.js'
 
 const stop = async (template: string, data: object, attribute = 'href', prefix?: string) => {
 	const compiled = await galley(template)
-	expect(() => compiled.render(data, util)).toThrow(prefix === undefined ? new RegExp(`^G5001: ${attribute}=`) : `G5001: ${attribute}=${JSON.stringify(prefix)} is no URL`)
+	expect(() => compiled.render(data)).toThrow(prefix === undefined ? new RegExp(`^G5001: ${attribute}=`) : `G5001: ${attribute}=${JSON.stringify(prefix)} is no URL`)
 }
 const refuse = async (source: string, code: string) => {
 	try { await galley(source); throw new Error('expected refusal') }
@@ -74,8 +74,8 @@ test('G-6 shared conversion for filters and outputs, with debug warnings and res
 		}
 		expect(warning).toHaveBeenCalledTimes(9)
 		expect(await render('{ value | join }', { value: [values[0], null] })).toBe('[object Object], ')
-		const compiled = await galley('{ x | explode }', { debug: true })
-		expect(() => compiled.render({}, { explode() { throw new Error('filter error') } })).toThrow('filter error')
+		const compiled = await galley('{ x | explode }', { debug: true, filters: { explode() { throw new Error('filter error') } } })
+		expect(() => compiled.render({})).toThrow('filter error')
 		expect(await render('{ value | number }', { value: values[0] })).toBe('[object Object]')
 		expect(warning).toHaveBeenCalledTimes(9)
 	} finally { warning.mockRestore() }

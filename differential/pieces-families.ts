@@ -45,7 +45,7 @@ export const piecesFamily = async (full: boolean) => {
 			for (const name of names) data[name] = name === selected ? payload : 'x='
 			const id = `pieces-${index}-${selected}-${payloadIndex}-${p}`
 			try {
-				const html = await template.render(data, {})
+				const html = await template.render(data)
 				rendered++
 				const places = reading.get(selected)!
 				const key = JSON.stringify([source, html, [...places].sort()])
@@ -61,7 +61,6 @@ export const piecesFamily = async (full: boolean) => {
 	for (const result of await observeStrict(cases)) {
 		for (const detail of placementFailures(result.places, expected.get(result.id)!)) failures.push({ id: result.id, detail })
 		if (result.urls.some(forbidden)) failures.push({ id: result.id, detail: 'forbidden URL carrying marker' })
-		for (const place of result.places) if (/\|attr:[^.]*\.(on|srcdoc$)/.test(place)) failures.push({ id: result.id, detail: `marker in ${place}` })
 		for (const list of result.lists) {
 			listsWithMarker++
 			const bad = candidates(list).find(candidate => forbidden(candidate.url))

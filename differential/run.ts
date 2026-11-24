@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runChromium } from './chromium.js'
 import galley from '../index.js'
-import util from '../util.js'
 import { browserPage, readBrowserOutput } from './browser.js'
 import { decode, encode, extend, generate, SEED, type Fixture } from './model.js'
 import { violations, type Result } from './oracle.js'
@@ -36,7 +35,7 @@ for (let index = 0; index < fixtures.length; index++) {
 	let result: Result
 	try {
 		const compiled = await galley(fixture.source)
-		try { result = { phase: 'render', output: await compiled.render(fixture.data, util) } }
+		try { result = { phase: 'render', output: await compiled.render(fixture.data) } }
 		catch (error) { result = { phase: 'render', error: String((error as Error).message) }; stops++ }
 	} catch (error) { result = { phase: 'compile', error: String((error as Error).message) }; refusals++ }
 	checkpoints += fixture.writes.length

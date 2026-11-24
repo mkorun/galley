@@ -3,12 +3,13 @@ import { analyze, contains } from './analysis.js'
 import { readContexts } from './context.js'
 import { UrlPrefix } from './url.js'
 import { stringify, filterWithWarnings } from './stringify.js'
+import { filterRegistry } from './filters.js'
 import { generate } from './codegen.js'
 import { GalleyDiagnosticError } from './diagnostics.js'
 import { lintAst } from './lint.js'
 import { stripText } from './text.js'
 import { parse } from './parser.js'
-import type { CompileOptions, CompiledTemplate, Diagnostic, FilterMap, SourceFile } from './types.js'
+import type { CompileOptions, CompiledTemplate, Diagnostic, SourceFile } from './types.js'
 
 export type * from './ast.js'
 export type * from './types.js'
@@ -54,11 +55,12 @@ const stripStatic = (nodes: readonly TemplateNode[], root = false): readonly Tem
 
 /** Lint uses the compiler's reader; unresolved partials preserve their entry context. */
 export async function lint(template: string, options: CompileOptions = {}): Promise<Diagnostic[]> {
+	const filters = filterRegistry(options)
 	const diagnostics: Diagnostic[] = []
 	try {
 		const parsed = parse({ id: options.sourceId ?? '<template>', text: template })
 		const ast = analyze(options.includes ? await expandPartials(parsed, options) : parsed)
-		diagnostics.push(...lintAst(ast, options))
+		diagnostics.push(...lintAst(ast, options, filters))
 		if (!diagnostics.some(item => item.severity === 'error')) {
 			const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
 			readContexts(prepared)
@@ -72,24 +74,21 @@ export async function lint(template: string, options: CompileOptions = {}): Prom
 
 export default async function galley<
 	Data extends object = Record<string, unknown>,
-	Filters extends object = FilterMap,
->(template = '', options: CompileOptions = {}): Promise<CompiledTemplate<Data, Filters>> {
+>(template = '', options: CompileOptions = {}): Promise<CompiledTemplate<Data>> {
+	const filters = filterRegistry(options)
 	const source: SourceFile = { id: options.sourceId ?? '<template>', text: template }
 	const initial = parse(source)
 	const parsed = await expandPartials(initial, options)
 	const ast = analyze(parsed)
-	const diagnostics = lintAst(ast, {
-		allowCode: options.allowCode === true,
-		...(options.knownFilters ? { knownFilters: options.knownFilters } : {}),
-	})
+	const diagnostics = lintAst(ast, options, filters)
 	const fatal = diagnostics.find(diagnostic => diagnostic.severity === 'error')
 	if (fatal) throw new GalleyDiagnosticError(fatal)
 	const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
 	const program = generate(readContexts(prepared), options)
 	if (program.async) {
-		const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', `return async function($,$$filters){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings) as (data: Data, filters: Filters) => Promise<string>
+		const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places) as (data: Data) => Promise<string>
 		return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) }
 	}
-	const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', `return function($,$$filters){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings) as (data: Data, filters: Filters) => string
+	const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places) as (data: Data) => string
 	return { async: false, diagnostics, render, ...(options.debug ? { source: program.body } : {}) }
 }

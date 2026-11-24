@@ -5,7 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## Unreleased
 
+### Fixed
+
+- Discover surrounding loop metadata in nested `{#each}` collection paths, including computed segments deeper in a path.
+  `lists[length]`, `lists[position]`, `lists[isFirst]` and `lists[isLast]` now use the enclosing loop's
+  bindings even when no other expression reads them; output paths retain their existing behavior.
+
 ### Breaking
+
+- B9: the loop name `position` shadows every outer binding of that name: data, a constant or a snippet parameter.
+  `$.position` reaches only root data; rename shadowed constants or parameters. Items/indices named `position`
+  are G2213; duplicate body declarations are G3021.
+
+- B6: snippet calls require exact arity. G3020 reports missing and extra `{@render}` arguments;
+  calls from `{@js}` throw TypeError naming the snippet and expected/actual counts.
+
+- B5: G3022 refuses a pipe after an unparenthesized unary, boolean or comparison expression.
+  Group the operator expression, or group the pipe when it is an operand; `??` is exempt.
+  In output tags, bind the operator result with `{@const}` before piping it.
+- B5: an output with a pipe inside parentheses, such as `{ a || (b | upper) }`, was literal text and is now an
+  expression: it renders when every pipe names a registered filter, otherwise G3001; in script/style it is G3001
+  or G3018. Escape the opening brace as `\{` to keep it as text.
+
+- B4: link built-in and custom filters at compile time; unknown names are G3001 errors at the filter's name.
+  Pass custom functions in `options.filters` on `galley()` or `lint()`; entries may replace built-ins. The linked
+  registry is frozen, so `{@js}` cannot replace a filter for later renders.
+  `render(data)` no longer takes filters: a second argument and the removed `knownFilters` option throw TypeError.
+  Filter failures now report G5003 with the filter name, source location and original `cause`.
 
 - B1: report G3007 with a source location for every bound name the engine cannot bind in strict async JavaScript
   or the generated code needs as a global (`String`, `Object`, `Array`, `TypeError`, `undefined`). This also refuses `await`
@@ -31,6 +57,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becomes literal text: CSS `{margin:0}` is retained, and a former `{ user-name }` interpolation stays as written.
 
 ### Added
+
+- B9: one-based `position` for array and object loops, generated only when referenced.
+  Nested loops own it; empty fallbacks retain the surrounding binding.
+
+- B6: snippets take several distinct positional parameters; every argument is forwarded in order,
+  including calls from `{@js}`. Repeated parameters are G2222. Partial snippet libraries are
+  exempt from unused-snippet G3006 warnings.
+
+- B5: pipes in parenthesized operands; `oneOf` with strict equality; `plural(locale, forms)`
+  using host plural rules (cached for up to 100 locales), finite counts and explicit category forms. Unsupported
+  locales and invalid forms throw instead of choosing defaults. G1102 and G1103 name the parentheses when an
+  operator follows a pipe.
 
 - B2: support one `{:else}` fallback for `{#each}`. It renders exactly when the body runs zero times and uses the
   surrounding bindings, with its own snippet scope. Both paths must preserve their HTML context and delimiter rules.

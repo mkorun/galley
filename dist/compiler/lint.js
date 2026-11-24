@@ -1,14 +1,15 @@
+import { LOOP_METADATA } from './ast.js';
 import { scriptedSnippets } from './analysis.js';
 import { locate } from './diagnostics.js';
 /** Names used by generated runtime calls must not be shadowed by template declarations. */
 const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined']);
-export const lintAst = (ast, options = {}) => {
+const invalidNames = new Map();
+export const lintAst = (ast, options, filters) => {
     const diagnostics = [];
     const declarations = new Set();
     const used = new Set();
     const duplicate = new Set();
     const scripted = scriptedSnippets(ast.children);
-    const invalidNames = new Map();
     const binding = (name, at) => {
         if (!invalidNames.has(name)) {
             let invalid = GENERATED_GLOBALS.has(name);
@@ -26,14 +27,24 @@ export const lintAst = (ast, options = {}) => {
             report({ code: 'G3007', severity: 'error', message: `The name ${name} cannot be bound by the generated code`, span: at, help: `Choose a name allowed in strict async JavaScript outside ${[...GENERATED_GLOBALS].join(', ')}.` });
     };
     const report = (diagnostic) => diagnostics.push(diagnostic);
-    // parseCore builds pipe inputs and unary/binary operands without pipes; only arguments can nest pipes.
-    const expression = (expr) => {
-        if (expr.kind === 'pipe') {
+    // Pipes may stand anywhere in an expression; check every input, operand and argument.
+    const expression = (expr, output = false) => {
+        if (expr.kind === 'unary')
+            expression(expr.operand, output);
+        else if (expr.kind === 'binary') {
+            expression(expr.left, output);
+            expression(expr.right, output);
+        }
+        else if (expr.kind === 'pipe') {
+            const input = expr.input;
+            if (!input.parenthesized && (input.kind === 'unary' || (input.kind === 'binary' && input.operator !== '??')))
+                report({ code: 'G3022', severity: 'error', message: 'A pipe beside an operator needs explicit grouping', span: expr.span, help: output ? 'Bind the operator expression with {@const chosen = …}, then write { chosen | filter }.' : 'Put the operator expression in parentheses before piping it, or put the pipe in parentheses as an operand.' });
+            expression(input, output);
             for (const pipe of expr.pipes) {
-                if (options.knownFilters && !options.knownFilters.has(pipe.name))
-                    report({ code: 'G3001', severity: 'warning', message: `Unknown pipe ${JSON.stringify(pipe.name)}`, span: pipe.span, help: 'Check the spelling or add the custom filter to knownFilters.' });
+                if (!Object.hasOwn(filters, pipe.name))
+                    report({ code: 'G3001', severity: 'error', message: `Unknown filter ${JSON.stringify(pipe.name)}`, span: pipe.span, help: `Register it in options.filters. Available filters: ${Object.keys(filters).join(', ')}.` });
                 for (const arg of pipe.args)
-                    expression(arg);
+                    expression(arg, output);
             }
         }
     };
@@ -81,7 +92,7 @@ export const lintAst = (ast, options = {}) => {
             }
             switch (node.kind) {
                 case 'output':
-                    expression(node.expression);
+                    expression(node.expression, !node.raw);
                     if (node.raw)
                         report({ code: 'G3002', severity: 'info', message: 'Raw output bypasses HTML escaping', span: node.span, help: 'Use raw output only for trusted HTML.' });
                     break;
@@ -99,7 +110,7 @@ export const lintAst = (ast, options = {}) => {
                     binding(node.item, node.span);
                     if (node.index)
                         binding(node.index, node.span);
-                    visit(node.children, scope, false, new Map(['length', 'isFirst', 'isLast'].map(name => [name, [...partials, node.span]])), partials);
+                    visit(node.children, scope, false, new Map(LOOP_METADATA.map(name => [name, [...partials, node.span]])), partials);
                     if (node.fallback)
                         visit(node.fallback, scope, false, undefined, partials);
                     break;
@@ -109,21 +120,24 @@ export const lintAst = (ast, options = {}) => {
                     break;
                 case 'snippet': {
                     const names = new Map();
-                    if (node.param) {
-                        binding(node.param, node.span);
-                        names.set(node.param, [...partials, node.span]);
+                    for (const param of node.params) {
+                        binding(param, node.span);
+                        names.set(param, [...partials, node.span]);
                     }
                     visit(node.children, scope, false, names, partials);
                     break;
                 }
                 case 'render': {
                     const snippet = resolve(scope, node.name);
-                    if (snippet)
+                    if (snippet) {
                         used.add(snippet);
+                        if (node.arguments.length !== snippet.params.length)
+                            report({ code: 'G3020', severity: 'error', message: `Snippet ${node.name} takes ${snippet.params.length} argument${snippet.params.length === 1 ? '' : 's'}, {@render} passes ${node.arguments.length}`, span: node.span, help: 'Pass exactly one argument per snippet parameter, in declaration order.' });
+                    }
                     else
                         report({ code: 'G3005', severity: 'error', message: `Snippet ${JSON.stringify(node.name)} is not visible in this block`, span: node.span, help: 'Declare the snippet in this block or an enclosing block before rendering it.' });
-                    if (node.argument)
-                        expression(node.argument);
+                    for (const argument of node.arguments)
+                        expression(argument);
                     break;
                 }
                 case 'js':
@@ -135,7 +149,7 @@ export const lintAst = (ast, options = {}) => {
     };
     visit(ast.children, null);
     for (const node of declarations)
-        if (!used.has(node) && !duplicate.has(node))
+        if (node.span.source === ast.span.source && !used.has(node) && !duplicate.has(node))
             report({ code: 'G3006', severity: 'warning', message: `Snippet ${JSON.stringify(node.name)} is never rendered`, span: node.span });
     return diagnostics;
 };

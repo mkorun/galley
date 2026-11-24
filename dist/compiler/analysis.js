@@ -1,7 +1,7 @@
-const LOOP_METADATA = new Set(['length', 'isFirst', 'isLast']);
+import { LOOP_METADATA } from './ast.js';
 const collectExpressionMetadata = (expression, used) => {
     if (expression.kind === 'path') {
-        if (LOOP_METADATA.has(expression.root))
+        if (LOOP_METADATA.includes(expression.root))
             used.add(expression.root);
         for (const segment of expression.segments)
             if (typeof segment.value === 'object')
@@ -96,8 +96,9 @@ export const analyze = (ast) => {
                     collectExpressionMetadata(node.expression, metadata);
             }
             else if (node.kind === 'render') {
-                if (metadata && node.argument)
-                    collectExpressionMetadata(node.argument, metadata);
+                if (metadata)
+                    for (const argument of node.arguments)
+                        collectExpressionMetadata(argument, metadata);
             }
             else if (node.kind === 'if') {
                 let branchChanged = false;
@@ -114,6 +115,8 @@ export const analyze = (ast) => {
                     annotated = { ...node, branches };
             }
             else if (node.kind === 'each') {
+                if (metadata)
+                    collectExpressionMetadata(node.collection, metadata);
                 const ownMetadata = new Set();
                 // The fallback stands outside this loop: a metadata name in it belongs to the enclosing loop, if any.
                 annotated = { ...node, children: annotate(node.children, ownMetadata), metadata: ownMetadata, ...(node.fallback ? { fallback: annotate(node.fallback, metadata) } : {}) };

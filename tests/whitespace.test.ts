@@ -117,7 +117,7 @@ describe('ADR-014 — bidirectional whitespace stripping', () => {
 			'<p>\n  { title }\n</p>',
 			{ includes: { import: () => Promise.resolve(''), basedir: '.' }, strip: true },
 		)
-		const result = tpl.render({ title: 'hi' }, util)
+		const result = tpl.render({ title: 'hi' })
 		expect(result).not.toContain('\n')
 	})
 
@@ -131,7 +131,7 @@ describe('ADR-014 — bidirectional whitespace stripping', () => {
 	const galley = (await import('../index.js')).default
 	const util = (await import('../util.js')).default
 	const blocked = await galley('<a hr\nef="{ u }">', { strip: true })
-	expect(() => blocked.render({ u: 'javascript:x' }, util)).toThrow('G5001')
+	expect(() => blocked.render({ u: 'javascript:x' })).toThrow('G5001')
 	const template = await galley('{@const n = 1}{#snippet s()}<i> x </i>{/snippet}{#if p}<b>{ v }</b>{/if}{#each xs as x}<i>{ x }</i>{/each}{@partial p.sort}<p>  ', { strip: true, includes: { import: async () => '<em>\nx</em>' } })
-	expect(await template.render({ p: true, v: '\n  < x', xs: ['\n '] }, util)).toBe('<b>\n  &lt; x</b><i>\n </i><em>x</em><p>')
+	expect(await template.render({ p: true, v: '\n  < x', xs: ['\n '] })).toBe('<b>\n  &lt; x</b><i>\n </i><em>x</em><p>')
  })

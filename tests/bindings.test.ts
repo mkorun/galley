@@ -81,6 +81,17 @@ test('B1: an engine failure other than invalid binding syntax is not hidden', as
 	const original = globalThis.Function
 	try {
 		globalThis.Function = function () { throw new EvalError('engine unavailable') } as unknown as FunctionConstructor
-		await expect(lint('{@const a = 1}')).rejects.toThrow('engine unavailable')
+		await expect(lint('{@const uncachedEngineFailure = 1}')).rejects.toThrow('engine unavailable')
+	} finally { globalThis.Function = original }
+})
+
+
+test('B1: binding answers are cached per name across lint calls', async () => {
+	const original = globalThis.Function
+	let questions = 0
+	try {
+		globalThis.Function = function (...args: string[]) { questions++; return original(...args) } as FunctionConstructor
+		for (let i = 0; i < 3; i++) await lint('{@const cachedBindingAnswer = 1}')
+		expect(questions).toBe(1)
 	} finally { globalThis.Function = original }
 })

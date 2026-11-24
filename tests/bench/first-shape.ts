@@ -2,7 +2,6 @@
 // Shapes: plain text and attributes, a loop, URL attributes (the code the URL_CHECK fix touches), and {#each} inside href.
 const dir = process.argv[2]
 const galley = (await import(`${dir}/index.ts`)).default
-const util = (await import(`${dir}/util.ts`)).default
 
 const shapes: Record<string, string> = {
 	base: '<html lang="{ meta.lang }"><head><meta charset="{ meta.charset }"></head><body><h1 title="{ title }">{ title }{#if draft}<em>D</em>{/if}</h1></body></html>',
@@ -20,7 +19,7 @@ const name=process.argv[3]
 if(!name || !shapes[name]) throw new Error('Expected a known benchmark shape')
 const tpl=await galley(shapes[name])
 const start=performance.now()
-const output=await tpl.render(data,util)
+const output=await tpl.render(data)
 const micros=(performance.now()-start)*1000
 if(typeof output!=='string'||!output)throw new Error('Missing first-render output')
 console.log(micros)

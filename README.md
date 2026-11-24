@@ -23,7 +23,6 @@ npm install @mkorun/galley
 
 ```typescript
 import galley from '@mkorun/galley'
-import util from '@mkorun/galley/util'
 
 // Compile once (e.g. at build start)
 const tpl = await galley(templateSource, {
@@ -37,7 +36,7 @@ const tpl = await galley(templateSource, {
 // `await` works for both sync and async templates (a non-Promise value
 // resolves immediately) and is the only call shape TypeScript can type as
 // a plain `string` without first checking `tpl.async`.
-const html = await tpl.render(data, util)
+const html = await tpl.render(data)
 ```
 
 ## Getting Started
@@ -76,7 +75,6 @@ const html = await tpl.render(data, util)
 
 ```typescript
 import galley from '@mkorun/galley'
-import util from '@mkorun/galley/util'
 import { readFile } from 'node:fs/promises'
 
 const source = await readFile('./templates/article.chase', 'utf-8')
@@ -91,7 +89,7 @@ const html = await tpl.render({
   meta: { lang: 'en', title: 'My First Post', tags: ['web', 'ssg'] },
   markup: '<p>Rendered markdown HTML.</p>',
   isDraft: false,
-}, util)
+})
 ```
 
 All template data lives in the context object `$`. `{ meta.title }` accesses `$.meta?.title` — undefined values produce an empty string, never an error.
@@ -117,19 +115,18 @@ import { lint } from '@mkorun/galley'
 
 const diagnostics = await lint(source, {
   sourceId: 'article.chase',
-  knownFilters: new Set(['slugify', 'dateFormat']),
+  filters: { shout: (value) => String(value).toUpperCase() },
 })
 ```
 
-The same filter check can run during compilation by passing `knownFilters`.
-Unknown names are returned as `G3001` warnings in `tpl.diagnostics`:
+Built-in filters are always available. Register custom functions with `options.filters` on
+`galley()` and `lint()`; a custom entry replaces a built-in of the same name. The compiler
+captures those functions, so later changes to the supplied map do not change a template.
+Unknown names are G3001 errors at the pipe, with the available names in the help.
 
-```typescript
-const tpl = await galley(source, {
-  includes,
-  knownFilters: new Set(Object.keys(util)),
-})
-```
+`render(data)` takes only data. A second argument throws a `TypeError` naming
+`options.filters`; the removed `knownFilters` option also throws. A throwing filter stops
+rendering with G5003, its name and source location, and the original thrown value as `cause`.
 
 `lex()`, `parse()`, and the AST types are available for editor tooling. The AST
 shape is experimental during the 0.x series; diagnostics and their codes are
@@ -307,6 +304,7 @@ Iterates over arrays and objects. Loop helper variables are available inside the
 | `isFirst` | `true` for the first element |
 | `isLast` | `true` for the last element |
 | `length` | total number of elements |
+| `position` | one-based item number |
 
 ```html
 {#each navigations.footer as link}
@@ -314,6 +312,15 @@ Iterates over arrays and objects. Loop helper variables are available inside the
   {#if !isLast}<span>&bull;</span>{/if}
 {/each}
 ```
+
+`position` is the one-based item number; the optional index after the comma stays
+zero-based for arrays and is the key for objects. Like `length`, `isFirst` and `isLast`,
+`position` belongs to the current loop and is emitted only when used. Inner loops
+have their own position; an empty fallback sees the surrounding binding. `position`
+shadows every outer binding of that name: data, a constant or a snippet parameter.
+Use `$.position` to reach only the root data; rename a shadowed constant or parameter.
+Items and indices cannot use metadata names (G2213); a constant of that name in the
+loop body's scope is G3021.
 
 **With index:**
 
@@ -355,7 +362,7 @@ If a loop variable shadows an outer name, use `$.prop` to reach the top-level co
 
 ---
 
-### `{#snippet name(param)}` / `{@render name(expr)}` — Snippets
+### `{#snippet name(a, b)}` / `{@render name(x, y)}` — Snippets
 
 Defines a reusable HTML block that can be called multiple times within the same template.
 
@@ -371,6 +378,20 @@ Defines a reusable HTML block that can be called multiple times within the same 
   {@render articleCard(article)}
 {/each}
 ```
+
+Snippets take positional parameters with exact arity:
+`{#snippet card(article, featured)}…{/snippet}{@render card(item, true)}`.
+Arguments are expressions; commas inside quoted strings, brackets or filter calls
+stay inside that argument. Parameter names must be distinct identifiers. Defaults,
+rest and named arguments are not supported. G3020 reports too few or too many
+arguments at `{@render}`; pass `undefined` explicitly when that is intended.
+A call from `{@js}` forwards all parameters and throws TypeError on an arity mismatch,
+naming the snippet and both counts.
+
+A partial can be a snippet library: put `card(article, featured)` and other snippet
+declarations in `cards.sort`, then write `{@partial cards.sort}{@render card(item, true)}`.
+Unused snippets declared in partials do not produce G3006; unused local snippets still do.
+Partials themselves take no parameters.
 
 Snippets can also be defined without parameters:
 
@@ -427,6 +448,24 @@ Pipes are chainable:
 { content | striptags | truncate(200) }
 ```
 
+A pipe binds loosest. To use a pipe as an operand, put it in parentheses:
+`{#if hidden || (style | oneOf('draft', 'private'))}…{/if}`.
+G3022 refuses an unparenthesized operator expression before a pipe (`!a | f`,
+`a || b | f`, comparisons and `&&`); `a ?? b | f` is allowed. In a condition or
+constant, write `(a || b) | f` to pipe the grouped result. An output cannot begin
+with `(`: use `{@const chosen = a || b}{ chosen | upper }` instead.
+
+`oneOf(value, ...candidates)` compares with `===`: no conversion, no NaN match,
+and objects match only themselves. Candidates may be literals or paths.
+
+`{ count } { count | plural(locale, forms) }` selects a string from CLDR categories
+such as `{ one: 'comment', other: 'comments' }`. It uses cached `Intl.PluralRules`
+for the supplied locale, without formatting the count. Counts must be finite numbers
+(fractions and negatives are allowed). Unsupported locales and missing/non-string
+forms throw TypeError; malformed locale tags throw the host's RangeError. G5003
+adds the filter's source location. There is no fallback to the host's default locale
+or to another category.
+
 **Built-in filters:**
 
 | Filter | Signature | Description |
@@ -451,7 +490,8 @@ Pipes are chainable:
 | `round` | `(n, decimals?)` | Round number |
 | `number` | `(n, locale?)` | Format number with locale |
 
-Custom filters can be passed via `util` — any function on the `util` object is available as a pipe.
+Register custom filters at compile time: `galley(source, { filters: { shout } })`.
+The built-ins are also exported from `@mkorun/galley/util` for direct calls.
 
 ---
 
@@ -502,8 +542,7 @@ JavaScript blocks execute in strict mode, matching the generated render function
 {@js}
 ```
 
-The block has full access to `$` (context), `$$filters` (the filter map passed to
-`render()`), and all loop/snippet variables. `await` is allowed — the template
+The block has full access to `$` (context), `$$filters` (the linked filter map), and all loop/snippet variables. `await` is allowed — the template
 is then compiled as an `async function`.
 
 For simple date formatting, the built-in filters are preferred — no `{@js}` needed:
@@ -570,7 +609,7 @@ interface GalleyOptions {
   strip?: boolean           // strip static whitespace before HTML checking (default: false)
   debug?: boolean           // expose generated function in tpl.source (default: false)
   stripEmptyMeta?: boolean  // remove <meta content=""> and <link href=""> (default: true)
-  knownFilters?: ReadonlySet<string> // report unknown pipes during compilation
+  filters?: Readonly<Record<string, (value: any, ...args: any[]) => unknown>> // add or replace built-ins
 }
 ```
 
@@ -585,7 +624,7 @@ Each template is compiled once into a JS function:
 const tpl = await galley(templateSource, options)
 
 // Render many times — no parse overhead
-const html = await tpl.render({ meta, markup, isDraft, tags }, util)
+const html = await tpl.render({ meta, markup, isDraft, tags })
 ```
 
 The compiler resolves partials, analyzes the AST and applies lint checks. It then applies `strip`, if enabled, to
@@ -677,7 +716,6 @@ it treats each partial as preserving its context and continues checking the surr
   boundaries; it never trims whitespace supplied by dynamic values. Complete tags start and finish in ordinary text, so removal preserves the reader's
   context; apparent metadata inside quoted values, comments or text elements stays literal.
 
-- **Misspelled or unregistered pipe names compile without complaint unless you opt in.** Filters are resolved at render time (`tpl.render(data, filters)`), not compile time, so galley cannot know your filter set unless you tell it: pass `knownFilters` (to `galley()` or `lint()`) to get a `G3001` warning for typos like `slugfiy`. Without it, a typo surfaces as a runtime `TypeError` with no source location.
 - **Invalid output expressions fail differently depending on where they are.** Per ADR-015, a malformed plain `{ expr }` falls back to literal text — useful for avoiding false positives on CSS/JS-shaped content that happens to sit inside `{ }`, but it also means a typo in that position can silently do nothing instead of erroring. Structurally required expressions (`{#if}` conditions, `{#each}` collections, `{@render}` arguments) always raise a compile error instead, since there's no sensible literal fallback for them.
 - **The include resolver is responsible for real filesystem confinement of `{@partial}` paths.** galley rejects the syntactic red flags before ever calling the resolver — `..` segments, absolute roots, UNC and Windows drive-prefixed paths, NUL bytes — but it has no notion of your filesystem layout, so it cannot itself guarantee a resolved path stays inside any particular directory.
 

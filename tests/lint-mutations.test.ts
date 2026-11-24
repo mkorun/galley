@@ -9,11 +9,11 @@ test('G-40: lint visits filter arguments and declaration expressions', async () 
 		'{#each xs as x}{ x | missing }{/each}',
 		'{#snippet s()}{ x | missing }{/snippet}{@render s()}',
 	]) {
-		const diagnostics = await lint(source, { knownFilters: new Set(['known']) })
+		const diagnostics = await lint(source, { filters: { known: (value: unknown) => value } })
 		expect(diagnostics.map(d => d.code), source).toEqual(['G3001'])
 		expect(diagnostics[0]?.message).toContain('missing')
 	}
-	expect(await lint('{ x | known }', { knownFilters: new Set(['known']) })).toEqual([])
+	expect(await lint('{ x | known }', { filters: { known: (value: unknown) => value } })).toEqual([])
 })
 
 test('G-40: lint resolves snippets through partial scopes and suppresses duplicate unused warnings', async () => {
@@ -29,7 +29,7 @@ test('G-40: compile and lint preserve async flags and debug output', async () =>
 		const template = await galley('text', { allowCode, debug: true })
 		expect(template.async).toBe(allowCode)
 		expect(template.source).toContain('[galley] AST compiler debug output')
-		if (allowCode) expect(template.render({}, {})).toBeInstanceOf(Promise)
+		if (allowCode) expect(template.render({})).toBeInstanceOf(Promise)
 	}
 })
 

@@ -1,6 +1,6 @@
 // Chase-New util — core filter functions
 // All filters are pure functions, RE2-compatible where regex is used.
-// Passed as second argument to tpl.render(data, util).
+// Linked by the compiler; also available for direct calls.
 
 import { stringify } from './compiler/stringify.js'
 import type { FilterMap } from './compiler/types.js'
@@ -113,7 +113,27 @@ const round = (n: number, decimals = 0): number => {
 const number = (n: number, locale = 'de-DE'): string =>
 	typeof n === 'number' ? n.toLocaleString(locale) : stringify(n)
 
-// ── stripWhitespace (for strip: true option) ─────────────────────────────────
+// ── Choices and plurals ─────────────────────────────────────────────────────
+
+const oneOf = (value: unknown, ...candidates: unknown[]): boolean =>
+	candidates.some(candidate => candidate === value)
+
+const pluralRules = new Map<string, Intl.PluralRules>()
+const plural = (count: number, locale: string, forms: Partial<Record<Intl.LDMLPluralRule, string>>): string => {
+	if (!Number.isFinite(count)) throw new TypeError(`plural needs a finite number, not ${String(count)}`)
+	let rules = pluralRules.get(locale)
+	if (!rules) {
+		if (typeof locale !== 'string' || Intl.PluralRules.supportedLocalesOf(locale).length === 0) throw new TypeError(`plural has no rules for the locale ${JSON.stringify(locale)}`)
+		rules = new Intl.PluralRules(locale)
+		if (pluralRules.size < 100) pluralRules.set(locale, rules)
+	}
+	const category = rules.select(count)
+	const form = forms && typeof forms === 'object' ? forms[category] : undefined
+	if (typeof form !== 'string') throw new TypeError(`plural has no form "${category}" for ${count} in ${locale}`)
+	return form
+}
+
+// ── stripWhitespace ─────────────────────────────────────────────────────────
 
 export const stripWhitespace = (val: string): string =>
 	!val || typeof val !== 'string'
@@ -132,8 +152,8 @@ const util = {
 	// Arrays
 	join, first, last, length,
 	// Numbers
-	round, number,
-	// Internal (used by strip option, not a user-facing pipe filter)
+	round, number, oneOf, plural,
+	// A filter like the others; the strip option does not use it.
 	stripWhitespace,
 } satisfies FilterMap
 

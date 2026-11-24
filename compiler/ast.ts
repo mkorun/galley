@@ -5,34 +5,39 @@ import type { SourceSpan } from './types.js'
  * shape is not covered by Galley's 0.x compatibility promise yet.
  */
 
+export const LOOP_METADATA = ['length', 'isFirst', 'isLast', 'position'] as const
+export type LoopMetadata = typeof LOOP_METADATA[number]
+
 export interface PathSegment {
 	readonly kind: 'property' | 'computed'
 	readonly value: string | number | PathExpression
 	readonly span: SourceSpan
 }
 
-export interface PathExpression {
+interface ExpressionBase { readonly parenthesized?: boolean }
+
+export interface PathExpression extends ExpressionBase {
 	readonly kind: 'path'
 	readonly root: string
 	readonly segments: readonly PathSegment[]
 	readonly span: SourceSpan
 }
 
-export interface LiteralExpression {
+export interface LiteralExpression extends ExpressionBase {
 	readonly kind: 'literal'
 	readonly value: string | number | boolean | null | undefined
 	readonly raw: string
 	readonly span: SourceSpan
 }
 
-export interface UnaryExpression {
+export interface UnaryExpression extends ExpressionBase {
 	readonly kind: 'unary'
 	readonly operator: '!'
 	readonly operand: Expression
 	readonly span: SourceSpan
 }
 
-export interface BinaryExpression {
+export interface BinaryExpression extends ExpressionBase {
 	readonly kind: 'binary'
 	readonly operator: '===' | '!==' | '>' | '<' | '>=' | '<=' | '&&' | '||' | '??'
 	readonly left: Expression
@@ -46,7 +51,7 @@ export interface PipeCall {
 	readonly span: SourceSpan
 }
 
-export interface PipeExpression {
+export interface PipeExpression extends ExpressionBase {
 	readonly kind: 'pipe'
 	readonly input: Expression
 	readonly pipes: readonly PipeCall[]
@@ -103,16 +108,16 @@ export interface EachNode extends NodeBase {
 	readonly children: readonly TemplateNode[]
 	/** `{:else}`: what renders once when the body ran zero times. It stands outside the loop: no item, index or loop metadata. */
 	readonly fallback?: readonly TemplateNode[]
-	readonly metadata?: ReadonlySet<'length' | 'isFirst' | 'isLast'>
+	readonly metadata?: ReadonlySet<LoopMetadata>
 }
 export interface SnippetNode extends NodeBase {
-	readonly kind: 'snippet'; readonly name: string; readonly param: string | null; readonly children: readonly TemplateNode[]
+	readonly kind: 'snippet'; readonly name: string; readonly params: readonly string[]; readonly children: readonly TemplateNode[]
 	/** The body once for every HTML context the snippet is rendered in. */
 	readonly variants?: readonly { readonly name: string; readonly children: readonly TemplateNode[] }[]
 	/** The variant for ordinary content, which `{@js}` calls by the snippet's name. Only for declarations lexically visible to `{@js}`. */
 	readonly js?: string
 }
-export interface RenderNode extends NodeBase { readonly kind: 'render'; readonly name: string; readonly argument: Expression | null; readonly slot?: HtmlSlot; readonly specialization?: string }
+export interface RenderNode extends NodeBase { readonly kind: 'render'; readonly name: string; readonly arguments: readonly Expression[]; readonly slot?: HtmlSlot; readonly specialization?: string }
 export interface PartialNode extends NodeBase { readonly kind: 'partial'; readonly path: string; readonly children?: readonly TemplateNode[] }
 export interface JsNode extends NodeBase { readonly kind: 'js'; readonly code: string; readonly awaits: boolean; readonly slot?: HtmlSlot }
 

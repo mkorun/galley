@@ -60,7 +60,7 @@ test('G-32: metadata targets and animation element names remain distinct', async
 	const { default: galley } = await import('../index.js')
 	for (const source of ['<link content="{ v }" href="x">', '<meta href="{ v }" content="x">', '<div to="{ v }" from="{ v }" by="{ v }" values="{ v }">', '<set to{@const n = 1}>', '<set to {#if p}hidden{/if}>']) {
 		const template = await galley(source)
-		expect(await template.render({ v: '', p: false }, {})).toBe(source.replaceAll('{ v }', '').replace('{@const n = 1}', '').replace('{#if p}hidden{/if}', ''))
+		expect(await template.render({ v: '', p: false })).toBe(source.replaceAll('{ v }', '').replace('{@const n = 1}', '').replace('{#if p}hidden{/if}', ''))
 	}
 	for (const [source, context] of [['<a title="', 'double(a.title;'], ['<svg><title><b>', 'text(title;'], ['<a x="x"href="v">', 'tag(a;']]) {
 		expect(() => read(source!)).toThrow(context!)
@@ -72,11 +72,11 @@ test('G-32: foreign exits consume all HTML separators; HTML integration names st
 	for (const name of ['svg', 'math', 'template']) for (const space of ['\t', '\n', '\f', '\r', ' ']) {
 		const source = `<${name}></${name}${space}><style>a<b</style>`
 		const template = await galley(source)
-		expect(await template.render({}, {})).toBe(source)
+		expect(await template.render({})).toBe(source)
 	}
 	for (const name of ['foreignObject', 'desc', 'mi', 'mo', 'mn', 'ms', 'mtext', 'annotation-xml']) {
 		const template = await galley(`<${name}><b><a href="{ u }">x</a></b></${name}>`)
-		expect(() => template.render({ u: 'javascript:x' }, {})).toThrow('G5001')
+		expect(() => template.render({ u: 'javascript:x' })).toThrow('G5001')
 	}
 })
 
@@ -86,10 +86,10 @@ test('G-32: attribute terminators and metadata non-targets keep their meanings',
 	for (const source of ['<a x/y>', '<a x={@const n = 1}"v">']) expect(() => read(source)).toThrow('G3014')
 	for (const source of ['<meta content="x" title="{ v }">', '<link href="/x" title="{ v }">']) {
 		const template = await galley(source)
-		expect(await template.render({ v: '' }, {})).toBe(source.replace('{ v }', ''))
+		expect(await template.render({ v: '' })).toBe(source.replace('{ v }', ''))
 	}
 	const template = await galley('{#snippet s()}OK{/snippet}{#each xs as x}{@js}return s(){@js}{/each}', { allowCode: true })
-	expect(await template.render({ xs: [1] }, {})).toBe('OK')
+	expect(await template.render({ xs: [1] })).toBe('OK')
 })
 
 test('G-32: every variant key field preserves placement and quote grammar', () => {
@@ -120,9 +120,9 @@ test('G-32: static metadata, slot flags, strip boundaries and empty each paths a
 	expect(text.kind === 'output' && text.slot).toEqual({ place: 'text', url: false, metadata: false })
 	const source = '<meta content="x{@const n = 1}">'
 	const template = await galley(source)
-	expect(await template.render({}, {})).toBe('<meta content="x">')
+	expect(await template.render({})).toBe('<meta content="x">')
 	const stripped = await galley('<b>  { v }', { strip: true })
-	expect(await stripped.render({ v: 'x' }, {})).toBe('<b>  x')
+	expect(await stripped.render({ v: 'x' })).toBe('<b>  x')
 	for (const source of ['<a{#each xs as x} {/each}href="{ u }">', '<a {#each xs as x}hidden{/each}href="{ u }">']) await expect(galley(source)).rejects.toThrow('G3014')
 	await expect(galley('{#if p}<a {@const n = 1}{/if}')).rejects.toThrow('G3010')
 	await expect(galley('{#if p}<a {@const n = 1}\n{/if}', { strip: true })).rejects.toThrow('G3010')

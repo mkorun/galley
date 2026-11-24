@@ -7,7 +7,7 @@ import { span } from '../compiler/diagnostics.js'
 
 const expression = (raw: string) => parseExpression(raw, span({ id: 'expression', text: raw }, 0, raw.length))
 const path = (raw: string) => parsePath(raw, span({ id: 'path', text: raw }, 0, raw.length))
-const render = async (source: string, data: object = {}, filters: object = {}) => (await galley(source)).render(data, filters)
+const render = async (source: string, data: object = {}, filters: object = {}) => (await galley(source, { filters: filters as any })).render(data)
 
 test('path and pipe names retain every allowed ASCII letter, digit and underscore', async () => {
 	const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_'

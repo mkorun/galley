@@ -1,5 +1,6 @@
+import { LOOP_METADATA } from './ast.js';
 import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
-import { parseExpression } from './expression.js';
+import { parseArguments, parseExpression, checkRoots } from './expression.js';
 import { lex } from './lexer.js';
 import { textSpans } from './text.js';
 import { checkPathRoots, parsePath } from './path.js';
@@ -165,8 +166,11 @@ export const parseTokens = (source, input) => {
                 const snippet = arg.slice(0, open).trim();
                 if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(snippet))
                     fail('G2107', `Invalid snippet name ${JSON.stringify(snippet)}`, token.span);
-                const rawArgument = arg.slice(open + 1, close).trim();
-                return { kind: 'render', name: snippet, argument: rawArgument ? parseExpression(rawArgument, expressionSpan(token, rawArgument)) : null, span: token.span };
+                const rawArguments = arg.slice(open + 1, close);
+                const args = rawArguments.trim() ? parseArguments(rawArguments, span(at.source, at.start + open + 1, at.start + close), `snippet ${snippet}`) : [];
+                for (const argument of args)
+                    checkRoots(argument);
+                return { kind: 'render', name: snippet, arguments: args, span: token.span };
             }
             default: return fail('G2100', `Unknown directive {@${name}}`, token.span, 'Supported directives are raw, partial, const, and render.');
         }
@@ -218,7 +222,7 @@ export const parseTokens = (source, input) => {
         if (index && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(index))
             fail('G2212', `Invalid index name ${JSON.stringify(index)}`, opening.span);
         for (const name of [item, index])
-            if (name && ['length', 'isFirst', 'isLast'].includes(name))
+            if (LOOP_METADATA.includes(name))
                 fail('G2213', `Loop name ${name} collides with loop metadata`, opening.span, 'Choose another item or index name.');
         if (index === item)
             fail('G2214', 'Item and index names must differ', opening.span);
@@ -247,15 +251,22 @@ export const parseTokens = (source, input) => {
         const open = body.indexOf('('), close = body.lastIndexOf(')');
         if (open < 1 || close !== body.length - 1)
             fail('G2220', '{#snippet} requires name(parameter)', opening.span);
-        const name = body.slice(0, open).trim(), param = body.slice(open + 1, close).trim() || null;
+        const name = body.slice(0, open).trim(), rawParams = body.slice(open + 1, close).trim();
+        const params = rawParams ? rawParams.split(',').map(param => param.trim()) : [];
         if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
             fail('G2221', `Invalid snippet name ${JSON.stringify(name)}`, opening.span);
-        if (param && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(param))
-            fail('G2222', `Invalid snippet parameter ${JSON.stringify(param)}`, opening.span);
+        const seen = new Set();
+        for (const param of params) {
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(param))
+                fail('G2222', `Invalid snippet parameter ${JSON.stringify(param)}`, opening.span);
+            if (seen.has(param))
+                fail('G2222', `Repeated snippet parameter ${JSON.stringify(param)}`, opening.span);
+            seen.add(param);
+        }
         const result = parseChildren('snippet');
         const stop = result.stop ?? fail('G2223', `Unclosed {#snippet ${body}}`, opening.span, 'Add {/snippet} after the snippet.');
         cursor++;
-        return { kind: 'snippet', name, param, children: result.children, span: span(opening.span.source, opening.span.start, stop.span.end) };
+        return { kind: 'snippet', name, params, children: result.children, span: span(opening.span.source, opening.span.start, stop.span.end) };
     };
     const astSpan = span(source, 0, source.text.length);
     const result = parseChildren(null);

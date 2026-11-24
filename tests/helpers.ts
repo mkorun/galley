@@ -17,7 +17,7 @@ export const render = async (
 	options: Parameters<typeof galley>[1] = { includes: noPartials },
 ): Promise<string> => {
 	const tpl = await galley(template, options)
-	const result = tpl.render(data, util)
+	const result = tpl.render(data)
 	if (result instanceof Promise) return result
 	return result as string
 }
@@ -28,7 +28,7 @@ export const renderCode = async (
 	data: object = {},
 ): Promise<string> => {
 	const tpl = await galley(template, { includes: noPartials, allowCode: true })
-	return tpl.render(data, util) as Promise<string>
+	return tpl.render(data) as Promise<string>
 }
 
 export { util }

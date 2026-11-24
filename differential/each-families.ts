@@ -63,7 +63,7 @@ export const eachFamily = async (family: string, full: boolean) => {
 			for (const name of names) data[name] = name === selected ? MARKER : emptyMeta && name.startsWith('e') ? '' : 'x='
 			const id = `${family}-${index}-${selected}-${xs.length}-${emptyMeta}-${p}`
 			try {
-				const html = await template.render(data, {})
+				const html = await template.render(data)
 				rendered++
 				const places = reading.get(selected)!
 				const key = JSON.stringify([source, html, [...places].sort()])

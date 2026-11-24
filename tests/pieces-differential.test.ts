@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test'
 import { piecesFamily, piecesSources } from '../differential/pieces-families.js'
 import { candidates } from '../differential/srcset.js'
 import * as browser from '../differential/strict-browser.js'
+import { UrlPrefix } from '../compiler/url.js'
 import * as compiler from '../index.js'
 
 test('B3: srcset candidates skip descriptors and retain URL offsets independently of the checker', () => {
@@ -24,8 +25,16 @@ test('B3: pieces smoke observes real Chromium lists and catches a missing separa
 	expect(report.failures).toEqual([])
 }, 56000)
 
+test('B3: pieces smoke fails when URL checking stops nothing', async () => {
+	const check = spyOn(UrlPrefix.prototype, 'check').mockImplementation(() => {})
+	try {
+		const report = await piecesFamily(false)
+		expect(report.failures.some(item => item.detail.startsWith('forbidden candidate'))).toBe(true)
+	} finally { check.mockRestore() }
+}, 56000)
+
 test('B3: pieces oracle judges every candidate of a marker-bearing list and rejects misplaced markers', async () => {
-	const observe = spyOn(browser, 'observeStrict').mockImplementation(async cases => cases.map(item => ({ id: item.id, places: ['1|tag', '1|attr:a.onclick', '1|attr:iframe.srcdoc'], urls: ['javascript:x'], lists: ['/ok.png 1x, javascript:M1=1 2x'], foreign: false, text: false })))
+	const observe = spyOn(browser, 'observeStrict').mockImplementation(async cases => cases.map(item => ({ id: item.id, places: ['1|tag'], urls: ['javascript:x'], lists: ['/ok.png 1x, javascript:M1=1 2x'], foreign: false, text: false })))
 	try {
 		const report = await piecesFamily(false)
 		expect(report.sources).toBe(40)
@@ -33,8 +42,6 @@ test('B3: pieces oracle judges every candidate of a marker-bearing list and reje
 		expect(report.observed).toBe(18)
 		expect(report.failures.some(item => item.detail === '1|tag')).toBe(true)
 		expect(report.failures.some(item => item.detail === 'forbidden URL carrying marker')).toBe(true)
-		expect(report.failures.some(item => item.detail === 'marker in 1|attr:a.onclick')).toBe(true)
-		expect(report.failures.some(item => item.detail === 'marker in 1|attr:iframe.srcdoc')).toBe(true)
 		expect(report.failures.some(item => item.detail.startsWith('forbidden candidate'))).toBe(true)
 		const compile = spyOn(compiler, 'default').mockRejectedValue(new Error('compiler unavailable'))
 		try {

@@ -9,11 +9,11 @@ import { fileURLToPath } from 'node:url'
 // themselves when it isn't present instead of failing the whole file.
 const legacyPath = '../../private/legacy/index'
 const legacyModule = await import(legacyPath).catch(() => null)
-const galleyLegacy = legacyModule?.default as typeof galley | undefined
+const galleyLegacy = legacyModule?.default as ((...args: any[]) => Promise<{ render(data: object, filters: object): string }>) | undefined
 
 const render = async (template: string, data: Record<string, unknown> = {}) => {
 	const compiled = await galley(template)
-	return compiled.render(data, util as any)
+	return compiled.render(data)
 }
 
 describe('AST compiler baseline', () => {
@@ -34,7 +34,7 @@ describe('AST compiler baseline', () => {
 		for (const [template, data] of cases) {
 			const legacy = await galleyLegacy!(template, { includes: { import: async () => '' } })
 			const compiled = await galley(template)
-			expect(await compiled.render(data, util as any)).toBe(await legacy.render(data, util))
+			expect(await compiled.render(data)).toBe(await legacy.render(data, util))
 		}
 	})
 
@@ -42,7 +42,7 @@ describe('AST compiler baseline', () => {
 		const compiled = await galley('A{@partial p.sort}B', {
 			includes: { import: async path => path.endsWith('/p.sort') ? '<b>{ title }</b>' : '' },
 		})
-		expect(compiled.render({ title: 'T' }, util as any)).toBe('A<b>T</b>B')
+		expect(compiled.render({ title: 'T' })).toBe('A<b>T</b>B')
 	})
 
 	test.skipIf(!galleyLegacy)('matches ADR-014 structural whitespace behavior', async () => {
@@ -56,7 +56,7 @@ describe('AST compiler baseline', () => {
 		for (const [template, data] of cases) {
 			const legacy = await galleyLegacy!(template, { includes: { import: async () => '' } })
 			const compiled = await galley(template)
-			expect(compiled.render(data, util as any)).toBe(legacy.render(data, util))
+			expect(compiled.render(data)).toBe(legacy.render(data, util))
 		}
 	})
 
@@ -65,10 +65,10 @@ describe('AST compiler baseline', () => {
 		for (const data of [{}, { description: 'D', url: '/x' }]) {
 			const legacy = await galleyLegacy!(template, { includes: { import: async () => '' } })
 			const compiled = await galley(template)
-			expect(compiled.render(data, util as any)).toBe(legacy.render(data, util))
+			expect(compiled.render(data)).toBe(legacy.render(data, util))
 		}
 		const preserved = await galley('<meta content="{ value }">', { stripEmptyMeta: false })
-		expect(preserved.render({}, util as any)).toBe('<meta content="">')
+		expect(preserved.render({})).toBe('<meta content="">')
 	})
 
 	test('compiler production patterns avoid unsupported RE2 constructs', async () => {
@@ -108,14 +108,13 @@ describe('AST compiler baseline', () => {
 
 	test('lint reports unknown filters and unused snippets without codegen', async () => {
 		const diagnostics = await lint('{#snippet unused(x)}{ x }{/snippet}{ title | slugfiy }', {
-			knownFilters: new Set(['slugify']),
+			filters: { slugify: util.slugify },
 		})
 		expect(diagnostics.map(d => d.code)).toEqual(['G3001', 'G3006'])
 	})
 
-	test('compile options pass known filters into diagnostics', async () => {
-		const compiled = await galley('{ title | slugfiy }', { knownFilters: new Set(['slugify']) })
-		expect(compiled.diagnostics.map(diagnostic => diagnostic.code)).toEqual(['G3001'])
+	test('compile rejects unknown filters with a diagnostic', async () => {
+		await expect(galley('{ title | slugfiy }')).rejects.toThrow('G3001')
 	})
 
 	test('compiler internals cannot be shadowed by template variables', async () => {
@@ -152,6 +151,6 @@ describe('AST compiler baseline', () => {
 	test('await in trusted JS creates a discriminated async template', async () => {
 		const compiled = await galley('{@js}return await Promise.resolve("ok"){@js}', { allowCode: true })
 		expect(compiled.async).toBe(true)
-		expect(await compiled.render({}, util as any)).toBe('ok')
+		expect(await compiled.render({})).toBe('ok')
 	})
 })

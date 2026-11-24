@@ -13,7 +13,7 @@ test('G-41: scripted snippet marking preserves hoisting, shadowing and restored 
 	const outer = shadowed.children[0]!
 	expect(outer.kind === 'snippet' && outer.js).toBeUndefined()
 	const template = await galley(`{#snippet s()}outer{/snippet}{@partial p.sort}{@js} return s() {@js}`, { allowCode: true, includes: { import: async () => `{@js} return s() {@js}` } })
-	expect(await template.render({}, {})).toBe('outerouter')
+	expect(await template.render({})).toBe('outerouter')
 	// Out-of-scope declarations must not acquire a text specialization at a later JS block.
 	for (const source of [
 		`{#if p}{#snippet hidden()}<{/snippet}{/if}{@js} return '' {@js}`,

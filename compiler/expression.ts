@@ -61,30 +61,40 @@ const hasOuterParentheses = (raw: string): boolean => {
 	return depth === 0 && !quote
 }
 
-const parsePipe = (raw: string, at: SourceSpan): PipeCall => {
+const pipeOperatorHelp = (raw: string): string | undefined =>
+	ORDERED_OPERATORS.some(operator => splitTopLevel(raw, operator).length > 0)
+		? "Put the pipe in parentheses before using it as an operand, for example {#if (s | oneOf('published')) && n > 1}."
+		: undefined
+
+const parsePipe = (rawInput: string, atInput: SourceSpan): PipeCall => {
+	const { text: raw, span: at } = trimSpan(rawInput, atInput)
 	const open = raw.indexOf('(')
 	const name = (open < 0 ? raw : raw.slice(0, open)).trim()
-	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) fail('G1102', `Invalid pipe name ${JSON.stringify(name)}`, at)
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) fail('G1102', `Invalid pipe name ${JSON.stringify(name)}`, at, pipeOperatorHelp(raw))
 	if (open < 0) return { name, args: [], span: at }
-	if (!raw.endsWith(')')) fail('G1103', `Pipe ${name} is missing its closing )`, at)
+	if (!raw.endsWith(')')) fail('G1103', `Pipe ${name} is missing its closing )`, at, pipeOperatorHelp(raw))
 	const body = raw.slice(open + 1, -1)
-	const commaPositions = splitTopLevel(body, ',')
+	return { name, args: parseArguments(body, span(at.source, at.start + open + 1, at.end - 1), `pipe ${name}`), span: at }
+}
+
+/** Pipe and snippet arguments share one top-level comma splitter and retain each argument's source. */
+export const parseArguments = (raw: string, at: SourceSpan, owner: string): Expression[] => {
 	const args: Expression[] = []
 	let start = 0
-	for (const end of [...commaPositions, body.length]) {
-		const chunk = body.slice(start, end)
-		const argAt = span(at.source, at.start + open + 1 + start, at.start + open + 1 + end)
+	for (const end of [...splitTopLevel(raw, ','), raw.length]) {
+		const chunk = raw.slice(start, end)
+		const argAt = span(at.source, at.start + start, at.start + end)
 		if (chunk.trim()) args.push(parsePiped(chunk, argAt))
-		else fail('G1104', `Empty argument in pipe ${name}`, argAt)
+		else fail('G1104', `Empty argument in ${owner}`, argAt)
 		start = end + 1
 	}
-	return { name, args, span: at }
+	return args
 }
 
 const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 	const { text: raw, span: at } = trimSpan(rawInput, atInput)
 	if (!raw) fail('G1100', 'Expected an expression', at)
-	if (hasOuterParentheses(raw)) return parseCore(raw.slice(1, -1), span(at.source, at.start + 1, at.end - 1))
+	if (hasOuterParentheses(raw)) return { ...parsePiped(raw.slice(1, -1), span(at.source, at.start + 1, at.end - 1)), parenthesized: true }
 	const literalNode = literal(raw, at)
 	if (literalNode) return literalNode
 	// The dominant template expression is a plain path. Avoid the operator
@@ -130,14 +140,14 @@ const parsePiped = (rawInput: string, atInput: SourceSpan): Expression => {
 	const pipes: PipeCall[] = []
 	let start = first + 1
 	for (const end of [...pipePositions.slice(1), rawInput.length]) {
-		pipes.push(parsePipe(rawInput.slice(start, end).trim(), span(atInput.source, atInput.start + start, atInput.start + end)))
+		pipes.push(parsePipe(rawInput.slice(start, end), span(atInput.source, atInput.start + start, atInput.start + end)))
 		start = end + 1
 	}
 	const node: PipeExpression = { kind: 'pipe', input, pipes, span: atInput }
 	return node
 }
 
-const checkRoots = (expression: Expression): void => {
+export const checkRoots = (expression: Expression): void => {
 	if (expression.kind === 'path') checkPathRoots(expression)
 	else if (expression.kind === 'unary') checkRoots(expression.operand)
 	else if (expression.kind === 'binary') { checkRoots(expression.left); checkRoots(expression.right) }

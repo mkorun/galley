@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { render } from './helpers'
 
 describe('Filter/Pipes — { value | filter }', () => {
-	test('unknown filter fails clearly at render time', async () => {
+	test('unknown filter names the misspelled filter', async () => {
 		await expect(render('{ value | slugfiy }', { value: 'Hello' }))
 			.rejects.toThrow(/slugfiy/)
 	})

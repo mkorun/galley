@@ -2,7 +2,6 @@ import { runChromium } from './chromium.js'
 import galley, { GalleyDiagnosticError, parse } from '../index.js'
 import type { TemplateNode } from '../compiler/ast.js'
 import { readContexts } from '../compiler/context.js'
-import util from '../util.js'
 import { forbidden } from './oracle.js'
 import { randomSources, RANDOM_RUNS } from './random.js'
 import { observeStrict, type BrowserCase } from './strict-browser.js'
@@ -55,7 +54,7 @@ export const strictFamilies = async (full: boolean) => {
 				if (emptyMeta) for (const name of names) if (name.startsWith('e')) data[name] = ''
 				const id = `${settings.alphabet}-${index}-${selected}-${p}-${emptyMeta}`
 				try {
-					const html = await template.render(data, util)
+					const html = await template.render(data)
 					rendered++
 					const places = reading.get(selected)!
 					const key = JSON.stringify([source, html, [...places].sort()])
@@ -82,7 +81,7 @@ export const strictFamilies = async (full: boolean) => {
 			const id = `foreign-${foreignCases++}`
 			const html = source + '<style><i data-galley-probe></i></style>'
 			digest.update(html + '\0')
-			try { const template = await galley(html); await template.render({}, util) }
+			try { const template = await galley(html); await template.render({}) }
 			catch (error) { refusal(error); refused++; continue }
 			// A refused source already satisfies the implication. With this closed alphabet, a source without
 			// either foreign entry token cannot enter a foreign namespace. Observe every remaining candidate.
@@ -105,7 +104,7 @@ export const strictFamilies = async (full: boolean) => {
 		const id = `text-${a}-${b}-${owner}`
 		textPairs++; digest.update(source + '\0')
 		try {
-			const template = await galley(source), html = await template.render({ value: 'x=' }, util)
+			const template = await galley(source), html = await template.render({ value: 'x=' })
 			textCases.push({ id, html, kind: 'text', owner })
 		}
 		catch (error) { refusal(error); textRefused++ }

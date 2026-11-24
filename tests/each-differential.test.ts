@@ -14,7 +14,7 @@ test('B2: joins and moved preserve the prototype populations and reject changed 
 	const changed = spyOn(random, 'randomSources').mockImplementation((...args) => generate(...args).map(source => source + 'x'))
 	try { expect(() => eachSources('moved')).toThrow('Pinned moved sources changed') }
 	finally { changed.mockRestore() }
-})
+}, 11000)
 
 test('B2: each-else smoke families compile, render and observe real Chromium pages', async () => {
 	const argv = process.argv

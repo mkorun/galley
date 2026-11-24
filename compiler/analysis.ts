@@ -1,11 +1,9 @@
-import type { Expression, IfBranch, SnippetNode, TemplateAst, TemplateNode } from './ast.js'
-
-type LoopMetadata = 'length' | 'isFirst' | 'isLast'
-const LOOP_METADATA: ReadonlySet<string> = new Set<LoopMetadata>(['length', 'isFirst', 'isLast'])
+import { LOOP_METADATA } from './ast.js'
+import type { LoopMetadata, Expression, IfBranch, SnippetNode, TemplateAst, TemplateNode } from './ast.js'
 
 const collectExpressionMetadata = (expression: Expression, used: Set<LoopMetadata>): void => {
 	if (expression.kind === 'path') {
-		if (LOOP_METADATA.has(expression.root)) used.add(expression.root as LoopMetadata)
+		if (LOOP_METADATA.includes(expression.root as LoopMetadata)) used.add(expression.root as LoopMetadata)
 		for (const segment of expression.segments) if (typeof segment.value === 'object') collectExpressionMetadata(segment.value, used)
 	} else if (expression.kind === 'unary') collectExpressionMetadata(expression.operand, used)
 	else if (expression.kind === 'binary') {
@@ -76,7 +74,7 @@ export const analyze = (ast: TemplateAst): TemplateAst => {
 				if (metadata) collectExpressionMetadata(node.expression, metadata)
 			}
 			else if (node.kind === 'render') {
-				if (metadata && node.argument) collectExpressionMetadata(node.argument, metadata)
+				if (metadata) for (const argument of node.arguments) collectExpressionMetadata(argument, metadata)
 			}
 			else if (node.kind === 'if') {
 				let branchChanged = false
@@ -90,6 +88,7 @@ export const analyze = (ast: TemplateAst): TemplateAst => {
 				if (branchChanged) annotated = { ...node, branches }
 			}
 			else if (node.kind === 'each') {
+				if (metadata) collectExpressionMetadata(node.collection, metadata)
 				const ownMetadata = new Set<LoopMetadata>()
 				// The fallback stands outside this loop: a metadata name in it belongs to the enclosing loop, if any.
 				annotated = { ...node, children: annotate(node.children, ownMetadata), metadata: ownMetadata, ...(node.fallback ? { fallback: annotate(node.fallback, metadata) } : {}) }

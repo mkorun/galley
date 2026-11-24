@@ -187,10 +187,10 @@ export const readContexts = (ast: TemplateAst): TemplateAst => {
 				case 'text': {
 					const less = value.indexOf('<', index)
 					if (less < 0) { index = value.length; break }
+					if (less > index) { index = less; break }
 					const end = '</' + context.owner
 					const rest = asciiLower(value.slice(less, less + end.length + 1))
 					if (rest.startsWith(end) && /^[\t\n\f\r \/>]/.test(rest.slice(end.length))) {
-						index = less
 						Object.assign(context, { state: 'data', owner: '', strict: false })
 						break
 					}

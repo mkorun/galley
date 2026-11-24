@@ -2,7 +2,6 @@
 // Shapes: plain text and attributes, a loop, URL attributes (the code the URL_CHECK fix touches), and {#each} inside href.
 const dir = process.argv[2]
 const galley = (await import(`${dir}/index.ts`)).default
-const util = (await import(`${dir}/util.ts`)).default
 
 const shapes: Record<string, string> = {
 	base: '<html lang="{ meta.lang }"><head><meta charset="{ meta.charset }"></head><body><h1 title="{ title }">{ title }{#if draft}<em>D</em>{/if}</h1></body></html>',
@@ -25,11 +24,11 @@ for (const [name, src] of Object.entries(shapes)) {
 		compiles.push((performance.now() - t) * 1000 / 500)
 	}
 	const tpl = await galley(src)
-	for (let i = 0; i < 2000; i++) tpl.render(data, util)
+	for (let i = 0; i < 2000; i++) tpl.render(data)
 	const renders: number[] = []
 	for (let r = 0; r < 7; r++) {
 		const t = performance.now()
-		for (let i = 0; i < 2000; i++) tpl.render(data, util)
+		for (let i = 0; i < 2000; i++) tpl.render(data)
 		renders.push((performance.now() - t) * 1000 / 2000)
 	}
 	out[`${name}.compile`] = median(compiles)

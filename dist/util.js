@@ -1,6 +1,6 @@
 // Chase-New util — core filter functions
 // All filters are pure functions, RE2-compatible where regex is used.
-// Passed as second argument to tpl.render(data, util).
+// Linked by the compiler; also available for direct calls.
 import { stringify } from './compiler/stringify.js';
 // ── Strings ──────────────────────────────────────────────────────────────────
 const upper = (s) => typeof s === 'string' ? s.toUpperCase() : s;
@@ -84,7 +84,27 @@ const round = (n, decimals = 0) => {
     return Math.round(n * factor) / factor;
 };
 const number = (n, locale = 'de-DE') => typeof n === 'number' ? n.toLocaleString(locale) : stringify(n);
-// ── stripWhitespace (for strip: true option) ─────────────────────────────────
+// ── Choices and plurals ─────────────────────────────────────────────────────
+const oneOf = (value, ...candidates) => candidates.some(candidate => candidate === value);
+const pluralRules = new Map();
+const plural = (count, locale, forms) => {
+    if (!Number.isFinite(count))
+        throw new TypeError(`plural needs a finite number, not ${String(count)}`);
+    let rules = pluralRules.get(locale);
+    if (!rules) {
+        if (typeof locale !== 'string' || Intl.PluralRules.supportedLocalesOf(locale).length === 0)
+            throw new TypeError(`plural has no rules for the locale ${JSON.stringify(locale)}`);
+        rules = new Intl.PluralRules(locale);
+        if (pluralRules.size < 100)
+            pluralRules.set(locale, rules);
+    }
+    const category = rules.select(count);
+    const form = forms && typeof forms === 'object' ? forms[category] : undefined;
+    if (typeof form !== 'string')
+        throw new TypeError(`plural has no form "${category}" for ${count} in ${locale}`);
+    return form;
+};
+// ── stripWhitespace ─────────────────────────────────────────────────────────
 export const stripWhitespace = (val) => !val || typeof val !== 'string'
     ? val
     : val
@@ -99,8 +119,8 @@ const util = {
     // Arrays
     join, first, last, length,
     // Numbers
-    round, number,
-    // Internal (used by strip option, not a user-facing pipe filter)
+    round, number, oneOf, plural,
+    // A filter like the others; the strip option does not use it.
     stripWhitespace,
 };
 export default util;
