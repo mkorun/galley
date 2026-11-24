@@ -64,8 +64,7 @@ the browser version in that historical result does not have to match the local i
 resource loads; links are never activated. Each Chromium invocation has a timeout and uses an argument array. A
 failed batch is bisected until the failing case is named; no case is skipped. Generated HTML transport files live in
 temporary directories. Full `strict-run.ts` writes `STRICT-RESULT.json`; smoke mode prints its report without writing it.
-The committed `STRICT-RESULT.json` records 0.4.0's compiler. It will be written again before the release to record
-the compiler that ships.
+The committed `STRICT-RESULT.json` records the 0.5.0-rc.1 compiler, including feature packages A, B and C.
 
 The gate runs the corpus and smoke domains of the strict families; run the full families separately. Smoke mode uses
 40 sources per random family, 650 foreign sequences (depths 1–2), and 144 text-owner sources (four element names).
