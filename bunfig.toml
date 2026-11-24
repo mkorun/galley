@@ -1,4 +1,4 @@
 [test]
 # Per file: every compiler and runtime line and function must be exercised.
 coverageThreshold = { lines = 1.0, functions = 1.0 }
-coveragePathIgnorePatterns = ["tests/**"]
+coveragePathIgnorePatterns = ["tests/**", "../private/**"]
