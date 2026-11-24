@@ -26,4 +26,9 @@ export const filterWithWarnings = (debug, name, at, filter, ...args) => {
         warnOnFailure = previous;
     }
 };
+/** Construct the strict-undefined error only on failure; successful checks do no source lookup. */
+export const undefinedError = (at) => {
+    const { line, column } = locate(at.source, at.start);
+    return new Error(`G5002: ${at.source.text.slice(at.start, at.end)} is undefined at ${at.source.id}:${line}:${column}`);
+};
 //# sourceMappingURL=stringify.js.map

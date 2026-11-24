@@ -111,7 +111,8 @@ generator and independent `srcset` candidate oracle are pinned with the other st
 decoded marker-bearing list must pass the whole-prefix rule; placement and single-URL checks also apply. The smoke
 test fails if the URL checker no longer restarts at a separator. This command prints results without writing a record.
 
-`bun differential/rule17-run.ts` runs the rule 17 family: 336 cases across six HTML contexts, seven value/brace forms,
-four call paths (direct, snippet, partial and each fallback), and both strip settings. It checks independent expected
+`bun differential/rule17-run.ts` runs the rule 17 family: 896 cases across text owners, attributes, inline comments,
+doctypes and text-owner end boundaries, with nine value/brace forms, four call paths (direct, snippet, partial
+and each fallback), and both strip and strictBraces settings. Refusals retain their source offsets. It checks independent expected
 bytes and diagnostics, then observes all accepted pages in Chromium. The complete family runs in the gate; its oracle
 tests plant missing/misplaced markers, missing refusals and changed bytes.

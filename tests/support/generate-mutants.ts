@@ -44,11 +44,12 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
 	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : file.endsWith('parser.ts') ? [
+		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')"), source.indexOf("return fail('G2108'")],
 		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
 		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
 		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
-		[source.indexOf('export const braceDiagnostic'), source.indexOf('const expressionSpan')],
-		[source.indexOf("if (error.diagnostic.code === 'G1007')"), source.indexOf('// ADR-015:')],
+		[source.indexOf('export const braceDiagnostic'), source.indexOf('/** Lexical removals')],
+		[source.indexOf("if (error.diagnostic.code === 'G1106')"), source.indexOf('// ADR-015:')],
 		// B2: which continuation ends a branch, and the each fallback's parse and source span.
 		[source.indexOf("if ((token.kind === 'block-close'"), source.indexOf('\n\t\t\tcursor++')],
 		[source.indexOf("const result = parseChildren('each', 'each')"), source.indexOf('const parseSnippet')],
@@ -58,11 +59,19 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 	] : [[0, source.length]]
 	if (regions.some(([a,b]) => a! < 0 || b! <= a!)) throw new Error(`Unknown checkpoint region in ${file}`)
 	const visit = (node: ts.Node) => {
+		// Every grammar caller must retain its own offset, including callers outside the older checkpoint regions.
+		if (file === 'compiler/parser.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'expressionSpan') {
+			change(node.arguments[1]!, '0', 'expression source offset')
+			if (node.arguments[2]) change(node.arguments[2], 'undefined', 'expression source length')
+		}
+		if (file === 'compiler/parser.ts' && ts.isBinaryExpression(node) && node.getStart(ast) >= source.indexOf('const expressionSpan') && node.end < source.indexOf('/** Lexical removals')) change(node, node.left.getText(ast), 'span arithmetic')
+
 		if (!regions.some(([a,b]) => node.getStart(ast) >= a! && node.end <= b!)) { ts.forEachChild(node, visit); return }
 		if (ts.isExpressionStatement(node)) change(node, ';', 'delete statement')
 		if (ts.isReturnStatement(node) && node.expression) change(node.expression, 'undefined', 'drop returned value')
 		if (ts.isIfStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node)) flip(ts.isConditionalExpression(node) ? node.condition : node.expression)
 		if (ts.isForStatement(node) && node.condition) flip(node.condition)
+		if (file === 'compiler/parser.ts' && ts.isIfStatement(node) && node.expression.getText(ast) === "source.text[offset - 1] === '\\\\'") change(node.expression, `(${node.expression.getText(ast)} || source.text[offset - 2] === '\\\\')`, 'nonadjacent brace escape')
 		if (ts.isCaseClause(node)) change(node.expression, JSON.stringify('__mutation_unreachable_case__'), 'case comparison')
 		if (ts.isBinaryExpression(node)) {
 			const op = node.operatorToken.kind
@@ -79,12 +88,21 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.ExclamationToken) change(node, node.operand.getText(ast), 'negation')
 		if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) change(node, node.kind === ts.SyntaxKind.TrueKeyword ? 'false' : 'true', 'boolean')
 		if (ts.isCallExpression(node) && node.expression.getText(ast) === 'Math.max' && node.arguments.length === 2) change(node, node.arguments[1]!.getText(ast), 'remove clamp')
+		if (file === 'compiler/codegen.ts' && ts.isCallExpression(node)) {
+			if (node.expression.getText(ast) === 'checked') change(node, node.arguments[0]!.getText(ast), 'remove undefined check')
+			if (node.expression.getText(ast) === 'expressionCode' && node.arguments[2]?.getText(ast) === 'condition') {
+				change(node.arguments[2], 'false', 'check condition pipe'); change(node.arguments[2], 'true', 'skip operand pipe check')
+			}
+		}
+		if (file === 'compiler/index.ts' && ts.isCallExpression(node) && ['lintAst', 'readContexts'].includes(node.expression.getText(ast))) change(node, `${node.expression.getText(ast)}(${node.arguments.slice(0, -1).map(arg => arg.getText(ast)).join(', ')})`, 'repeat snippet marking')
 		// Registry construction and source spans are observable through the public compiler too.
 		if (file === 'compiler/filters.ts' && ts.isCallExpression(node)) {
 			if (node.expression.getText(ast) === 'Object.create') change(node, '{}', 'registry prototype')
 			if (node.expression.getText(ast) === 'Object.freeze') change(node, node.arguments[0]!.getText(ast), 'registry freeze')
 		}
 		if (file === 'compiler/expression.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'pipeOperatorHelp') change(node, 'undefined', 'pipe grouping help')
+		if (file === 'compiler/expression.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'trimSpan' && node.getStart(ast) > source.indexOf('const parsePiped')) change(node, '{ text: rawInput, span: atInput }', 'untrimmed pipe expression')
+		if (file === 'compiler/expression.ts' && ts.isPropertyAssignment(node) && node.name.getText(ast) === 'span' && node.initializer.getText(ast) === 'at' && node.parent.parent.getText(ast).startsWith('node: PipeExpression')) change(node.initializer, 'atInput', 'pipe result span')
 		if (file === 'util.ts' && ts.isNumericLiteral(node) && node.text === '100') {
 			change(node, '99', 'cache bound below'); change(node, '101', 'cache bound above')
 		}
@@ -96,6 +114,7 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		// Comparisons inside generated JavaScript live in template/string token text rather than TS expressions.
 		if (file.endsWith('codegen.ts') && (ts.isStringLiteral(node) || ts.isTemplateLiteralToken(node))) {
 			const raw = node.getText(ast)
+			if (raw.includes('return v;')) change(node, raw.replace('return v;', 'return undefined;'), 'drop checked value')
 			for (const match of raw.matchAll(/\+1\b/g)) change(node, raw.slice(0, match.index) + raw.slice(match.index! + 2), 'drop generated one-based offset')
 			for (const match of raw.matchAll(/,\$\$[A-Za-z0-9_]+=(?:null|0|false)(?=[,;])/g)) change(node, raw.slice(0, match.index) + raw.slice(match.index! + match[0].length), `drop generated declaration ${match[0]}`)
 			const inverse: Record<string,string> = { '!==': '===', '===': '!==', '!=': '==', '==': '!=', '>=': '<', '<=': '>', '>': '<=', '<': '>=' }

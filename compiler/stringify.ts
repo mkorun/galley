@@ -23,3 +23,9 @@ export const filterWithWarnings = (debug: boolean, name: string, at: SourceSpan,
 	}
 	finally { warnOnFailure = previous }
 }
+
+/** Construct the strict-undefined error only on failure; successful checks do no source lookup. */
+export const undefinedError = (at: SourceSpan): Error => {
+	const { line, column } = locate(at.source, at.start)
+	return new Error(`G5002: ${at.source.text.slice(at.start, at.end)} is undefined at ${at.source.id}:${line}:${column}`)
+}

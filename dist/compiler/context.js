@@ -40,10 +40,9 @@ const staticValue = (context, at) => {
     }
 };
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
-export const readContexts = (ast) => {
+export const readContexts = (ast, strictBraces = false, scripted = scriptedSnippets(ast.children)) => {
     let identity = 0, sequence = 0;
     const starts = [];
-    const scripted = scriptedSnippets(ast.children);
     const variants = new Map();
     const actualWrites = new Set();
     const renderWrites = [];
@@ -249,7 +248,7 @@ export const readContexts = (ast) => {
                         sourcePart++;
                     }
                     const part = spans[sourcePart];
-                    const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset);
+                    const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset, strictBraces);
                     if (diagnostic)
                         throw new GalleyDiagnosticError(diagnostic);
                 }
@@ -362,7 +361,7 @@ export const readContexts = (ast) => {
             if (node.kind === 'snippet') {
                 boundary(context, node.span);
                 const binding = scope.bindings.get(node.name);
-                result.push({ ...node, variants: binding.list, ...(scripted.has(node) ? { js: specialize(binding, data(), node.span) } : {}) });
+                result.push({ ...node, variants: binding.list, ...(scripted.has(node.span) ? { js: specialize(binding, data(), node.span) } : {}) });
                 continue;
             }
             if (node.kind === 'output' || node.kind === 'js') {

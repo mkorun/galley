@@ -25,9 +25,11 @@ export const contains = (nodes, kind) => nodes.some(node => node.kind === kind
     || (node.kind === 'if' && node.branches.some(branch => contains(branch.children, kind)))
     || ((node.kind === 'each' || node.kind === 'snippet' || node.kind === 'partial') && contains(node.children ?? [], kind))
     || (node.kind === 'each' && contains(node.fallback ?? [], kind)));
-/** Snippets callable by a visible JS block need a plain function binding as well as their variants. */
+/** Snippets callable by visible JS need a binding. Span identities survive strip and other node copies. */
 export const scriptedSnippets = (nodes) => {
     const scripted = new Set();
+    if (!contains(nodes, 'js'))
+        return scripted;
     // Only unmarked visible bindings need a visit at a JS block. Shadowing temporarily hides them.
     const visible = new Map(), unmarked = new Set();
     const visit = (nodes, sameScope = false) => {
@@ -54,7 +56,7 @@ export const scriptedSnippets = (nodes) => {
         for (const node of nodes) {
             if (node.kind === 'js') {
                 for (const binding of unmarked)
-                    scripted.add(binding);
+                    scripted.add(binding.span);
                 unmarked.clear();
             }
             else if (node.kind === 'partial')
@@ -74,7 +76,7 @@ export const scriptedSnippets = (nodes) => {
         }
         for (const [name, binding] of previous) {
             visible.set(name, binding);
-            if (!scripted.has(binding))
+            if (!scripted.has(binding.span))
                 unmarked.add(binding);
         }
     };

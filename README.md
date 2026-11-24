@@ -104,8 +104,7 @@ Inside script/style, an escaped value is G3018; HTML escaping cannot encode Java
 Write `\{` for a literal brace that was never meant as a value, including JavaScript and CSS braces.
 A brace whose first name contains `:`, `+` or `-` stays literal there: `<style>b{margin:0}</style>` now retains its CSS,
 and `<script>var n = "{ user-name }"</script>` retains those literal braces instead of inserting the data value.
-These rules are always on. Other malformed expressions retain their existing literal-text behavior; no strict-brace
-option is introduced by this change.
+These rules are always on. Other malformed expressions stay literal by default; `strictBraces` opts into rejecting them.
 
 The compiler also exports `lint()`, structured diagnostics, and the typed AST
 parser for editor and build-tool integrations:
@@ -268,6 +267,10 @@ The compiler does not read raw output to discover a new context. The same obliga
 {#if count >= 3}…{/if}
 {:else if count > 0}…
 ```
+
+Numeric literals must not have leading zeros: `007` and `-01` are G1106 at the number, with a suggested
+`7` or `-1`. `0`, `-0` and `0.5` are valid. Quoted literals can be operands, as in
+`{#if 'x' === 'y'}`; a single literal containing its own quote or an escape remains G1101.
 
 **Logical operators** (`&&` `||`):
 
@@ -608,10 +611,31 @@ interface GalleyOptions {
   allowCode?: boolean       // enable {@js} blocks (default: false)
   strip?: boolean           // strip static whitespace before HTML checking (default: false)
   debug?: boolean           // expose generated function in tpl.source (default: false)
+  strictUndefined?: boolean // reject undefined at checked render positions (default: false)
+  strictBraces?: boolean    // reject unescaped literal { outside script/style (default: false)
   stripEmptyMeta?: boolean  // remove <meta content=""> and <link href=""> (default: true)
   filters?: Readonly<Record<string, (value: any, ...args: any[]) => unknown>> // add or replace built-ins
 }
 ```
+
+With `strictBraces: true`, every unescaped `{` outside script and style must parse as a template tag,
+including in title, textarea, attribute values and inline comments. Otherwise compilation and `lint()` report
+G3019 at the brace with the parser's reason. Write `\{` for literal text; a lone `}` stays literal.
+Arithmetic, ternaries, method calls and `{!-- --}` comments are not template syntax. The option defaults to false.
+Snippet braces are judged where the snippet is rendered; unused snippets are not judged, so the same partial can
+pass in one template and fail in another that renders its snippet in a different context.
+
+With `strictUndefined: true`, rendering stops with G5002 when an output (escaped or raw), an each collection,
+a const value, or the first input of a pipe outside a condition is `undefined`. The error names the expression
+and its source file, line and column, at the value itself even when its text repeats a binding or tag name.
+For example, `{@const title = title}` reports a missing value at column 17. Checks happen once, before coercion.
+`null` remains allowed and an each over `null` takes its `{:else}`; an undefined collection stops. Use `??` or a guard
+for optional values.
+Conditions (including their pipes) are lenient. Snippet arguments are checked where the snippet uses them,
+but a pipe in an argument checks its initial input. Filter arguments and intermediate results are the filter's
+responsibility. A final undefined output still stops. Even an unused const is checked at binding;
+write `{@const optional = missing ?? ''}` for an optional alias. Skipped operands remain unevaluated.
+Both strict options default to false and can be enabled independently.
 
 ---
 

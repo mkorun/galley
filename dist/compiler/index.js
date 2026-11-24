@@ -1,7 +1,7 @@
-import { analyze, contains } from './analysis.js';
+import { analyze, contains, scriptedSnippets } from './analysis.js';
 import { readContexts } from './context.js';
 import { UrlPrefix } from './url.js';
-import { stringify, filterWithWarnings } from './stringify.js';
+import { stringify, filterWithWarnings, undefinedError } from './stringify.js';
 import { filterRegistry } from './filters.js';
 import { generate } from './codegen.js';
 import { GalleyDiagnosticError } from './diagnostics.js';
@@ -64,10 +64,11 @@ export async function lint(template, options = {}) {
     try {
         const parsed = parse({ id: options.sourceId ?? '<template>', text: template });
         const ast = analyze(options.includes ? await expandPartials(parsed, options) : parsed);
-        diagnostics.push(...lintAst(ast, options, filters));
+        const scripted = scriptedSnippets(ast.children);
+        diagnostics.push(...lintAst(ast, options, filters, scripted));
         if (!diagnostics.some(item => item.severity === 'error')) {
             const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
-            readContexts(prepared);
+            readContexts(prepared, options.strictBraces, scripted);
         }
     }
     catch (error) {
@@ -83,17 +84,18 @@ export default async function galley(template = '', options = {}) {
     const initial = parse(source);
     const parsed = await expandPartials(initial, options);
     const ast = analyze(parsed);
-    const diagnostics = lintAst(ast, options, filters);
+    const scripted = scriptedSnippets(ast.children);
+    const diagnostics = lintAst(ast, options, filters, scripted);
     const fatal = diagnostics.find(diagnostic => diagnostic.severity === 'error');
     if (fatal)
         throw new GalleyDiagnosticError(fatal);
     const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
-    const program = generate(readContexts(prepared), options);
+    const program = generate(readContexts(prepared, options.strictBraces, scripted), options);
     if (program.async) {
-        const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places);
+        const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
         return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
     }
-    const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', `return function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places);
+    const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
     return { async: false, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
 }
 //# sourceMappingURL=index.js.map

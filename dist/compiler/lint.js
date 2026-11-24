@@ -1,15 +1,13 @@
 import { LOOP_METADATA } from './ast.js';
-import { scriptedSnippets } from './analysis.js';
 import { locate } from './diagnostics.js';
 /** Names used by generated runtime calls must not be shadowed by template declarations. */
 const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined']);
 const invalidNames = new Map();
-export const lintAst = (ast, options, filters) => {
+export const lintAst = (ast, options, filters, scripted) => {
     const diagnostics = [];
     const declarations = new Set();
     const used = new Set();
     const duplicate = new Set();
-    const scripted = scriptedSnippets(ast.children);
     const binding = (name, at) => {
         if (!invalidNames.has(name)) {
             let invalid = GENERATED_GLOBALS.has(name);
@@ -60,7 +58,7 @@ export const lintAst = (ast, options, filters) => {
         const { line, column } = locate(at.source, at.start);
         return `${index < sites.length - 1 ? at.source.text.slice(at.start, at.end) + ' at ' : ''}${at.source.id}:${line}:${column}`;
     }).join(' -> ');
-    const visit = (nodes, parent, sameScope = false, names = new Map(), partials = []) => {
+    const visit = (nodes, parent, sameScope = false, names, partials = [], loop) => {
         const local = sameScope ? parent.snippets : new Map();
         const declare = (items) => {
             for (const node of items) {
@@ -81,13 +79,14 @@ export const lintAst = (ast, options, filters) => {
         };
         if (!sameScope)
             declare(nodes);
-        const scope = sameScope ? parent : { parent, snippets: local, names };
+        const scope = sameScope ? parent : { parent, snippets: local, names, loop, partials };
         for (const node of nodes) {
-            if (node.kind === 'const' || (node.kind === 'snippet' && scripted.has(node))) {
+            if (node.kind === 'const' || (node.kind === 'snippet' && scripted.has(node.span))) {
                 binding(node.name, node.span);
-                const sites = [...partials, node.span], previous = scope.names.get(node.name);
+                const sites = [...partials, node.span], previous = scope.names?.get(node.name) ?? (scope.loop && LOOP_METADATA.includes(node.name) ? [...scope.partials, scope.loop] : undefined);
                 if (previous)
                     report({ code: 'G3021', severity: 'error', message: `The name ${node.name} is declared twice in the same generated scope: ${declaration(previous)} and ${declaration(sites)}`, span: node.span, help: 'Use distinct names or put the declarations or partial inclusions in separate blocks.' });
+                scope.names ??= new Map();
                 scope.names.set(node.name, sites);
             }
             switch (node.kind) {
@@ -110,7 +109,7 @@ export const lintAst = (ast, options, filters) => {
                     binding(node.item, node.span);
                     if (node.index)
                         binding(node.index, node.span);
-                    visit(node.children, scope, false, new Map(LOOP_METADATA.map(name => [name, [...partials, node.span]])), partials);
+                    visit(node.children, scope, false, undefined, partials, node.span);
                     if (node.fallback)
                         visit(node.fallback, scope, false, undefined, partials);
                     break;

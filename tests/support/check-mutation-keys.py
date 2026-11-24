@@ -28,15 +28,19 @@ assert any(m['file'] == 'compiler/lint.ts' for m in original)
 for file, statements in {
     'util.ts': ['candidate === value', 'pluralRules.size < 100', 'pluralRules.set(locale, rules)'],
     'compiler/filters.ts': ["'knownFilters' in options", "typeof filter !== 'function'", 'Object.create(null)', 'Object.freeze(filters)'],
-    'compiler/stringify.ts': ['warnOnFailure = previous'],
-    'compiler/analysis.ts': ['collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)'],
-    'compiler/expression.ts': ['checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0'],
+    'compiler/stringify.ts': ['warnOnFailure = previous', 'new Error(`G5002:'],
+    'compiler/analysis.ts': ["contains(nodes, 'js')", 'collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)'],
+    'compiler/expression.ts': ["fail('G1106'", 'raw.length > 1', 'trimSpan(rawInput, atInput)', 'literal(raw, at)', 'checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0'],
     'compiler/path.ts': ['checkPathRoots(segment.value)'],
     'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)', 'checkRoots(argument)', 'seen.add(param)'],
 }.items():
     for statement in statements:
         assert any(m['file'] == file and statement in m['before'] for m in original), statement
-for kind in ['cache bound below', 'cache bound above', 'registry prototype', 'registry freeze', 'pipe expression span']:
+for statement in ['JSON.stringify(expression.value)', 'options.strictUndefined', 'condition ? input', 'checked(expressionCode(node.expression', 'checked(pathCode(node.collection', 'if(v===undefined)']:
+    assert any(m['file'] == 'compiler/codegen.ts' and statement in m['before'] for m in original), statement
+for kind in ['expression source offset', 'expression source length', 'span arithmetic']:
+    assert any(m['file'] == 'compiler/parser.ts' and m['kind'] == kind for m in original), kind
+for kind in ['cache bound below', 'cache bound above', 'registry prototype', 'registry freeze', 'pipe expression span', 'pipe result span', 'untrimmed pipe expression', 'nonadjacent brace escape']:
     assert any(m['kind'] == kind for m in original), kind
 assert sum(m['kind'] == 'pipe name span' for m in original) == 2
 assert sum(m['kind'] == 'pipe grouping help' for m in original) == 2

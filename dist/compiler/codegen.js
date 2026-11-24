@@ -32,13 +32,17 @@ const pathCode = (path, scope) => {
 export const generate = (ast, options = {}) => {
     const places = [];
     const place = (at) => { places.push(at); return places.length - 1; };
-    const expressionCode = (expression, scope) => {
+    const checked = (code, at) => options.strictUndefined ? `$$defined(${code},${place(at)})` : code;
+    const expressionCode = (expression, scope, condition = false) => {
         switch (expression.kind) {
             case 'path': return pathCode(expression, scope);
-            case 'literal': return expression.raw;
-            case 'unary': return `!(${expressionCode(expression.operand, scope)})`;
-            case 'binary': return `(${expressionCode(expression.left, scope)}${expression.operator}${expressionCode(expression.right, scope)})`;
-            case 'pipe': return expression.pipes.reduce((input, pipe) => `$$filter(${place(pipe.span)},'${pipe.name}',${input}${pipe.args.map(arg => `,${expressionCode(arg, scope)}`).join('')})`, expressionCode(expression.input, scope));
+            case 'literal': return typeof expression.value === 'string' ? JSON.stringify(expression.value) : expression.raw;
+            case 'unary': return `!(${expressionCode(expression.operand, scope, condition)})`;
+            case 'binary': return `(${expressionCode(expression.left, scope, condition)}${expression.operator}${expressionCode(expression.right, scope, condition)})`;
+            case 'pipe': {
+                const input = expressionCode(expression.input, scope, condition);
+                return expression.pipes.reduce((input, pipe) => `$$filter(${place(pipe.span)},'${pipe.name}',${input}${pipe.args.map(arg => `,${expressionCode(arg, scope, condition)}`).join('')})`, condition ? input : checked(input, expression.input.span));
+            }
         }
     };
     const strip = options.stripEmptyMeta !== false;
@@ -57,6 +61,8 @@ export const generate = (ast, options = {}) => {
     // $$url: the prefix of the URL value being written. $$tag: the <meta> or <link> start tag being written; $$meta: its target value.
     let body = "'use strict';if(arguments.length>1)throw new TypeError('Pass filters in options.filters, not render(data, filters)');$??={};let $$='',$$url=null,$$meta=null,$$tag=null,$$indent=0,$$skipNewline=false;";
     body += `const $$str=v=>v==null?'':$$stringify(v,${options.debug === true}),$$filter=(p,n,...a)=>$$filterWithWarnings(${options.debug === true},n,$$places[p],$$filters[n],...a);`;
+    if (options.strictUndefined)
+        body += 'const $$defined=(v,p)=>{if(v===undefined)throw $$undefinedError($$places[p]);return v;};';
     if (options.debug)
         body += '// [galley] AST compiler debug output\n';
     let sequence = 0;
@@ -158,18 +164,18 @@ export const generate = (ast, options = {}) => {
                     break;
                 case 'output': {
                     const value = `$$v${++sequence}`;
-                    const expr = expressionCode(node.expression, scope);
+                    const expr = checked(expressionCode(node.expression, scope), node.expression.span);
                     body += `{const ${value}=$$str(${expr})${node.raw ? '' : ".replace(/[&<>'\"]/g,c=>$$html[c])"};`;
                     body += `${written(node.slot, value, true, !node.raw)}${buffer}+=${value};${trackIndent ? '$$indent=0;$$skipNewline=false;' : ''}}`;
                     break;
                 }
                 case 'const':
-                    body += `const ${node.name}=(${expressionCode(node.expression, scope)}??'');`;
+                    body += `const ${node.name}=(${checked(expressionCode(node.expression, scope), node.expression.span)}??'');`;
                     declare(node.name);
                     break;
                 case 'if': {
                     node.branches.forEach((branch, index) => {
-                        body += index === 0 ? `if(${expressionCode(branch.condition, scope)}){` : branch.condition ? `else if(${expressionCode(branch.condition, scope)}){` : 'else{';
+                        body += index === 0 ? `if(${expressionCode(branch.condition, scope, true)}){` : branch.condition ? `else if(${expressionCode(branch.condition, scope, true)}){` : 'else{';
                         emitNodes(branch.children, scope, buffer);
                         body += '}';
                     });
@@ -180,7 +186,7 @@ export const generate = (ast, options = {}) => {
                     const metadata = node.metadata ?? new Set();
                     const needsCount = metadata.has('length') || metadata.has('isLast');
                     const needsCounter = metadata.has('isFirst') || metadata.has('isLast') || metadata.has('position');
-                    body += `{const ${collection}=${pathCode(node.collection, scope)};${node.fallback ? `let ${empty}=true;` : ''}if(${collection}){const ${array}=Array.isArray(${collection});`;
+                    body += `{const ${collection}=${checked(pathCode(node.collection, scope), node.collection.span)};${node.fallback ? `let ${empty}=true;` : ''}if(${collection}){const ${array}=Array.isArray(${collection});`;
                     if (needsCount)
                         body += `const ${count}=${array}?${collection}.length:Object.keys(${collection}).length;`;
                     const bindings = [node.item, ...metadata];

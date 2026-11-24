@@ -4,16 +4,16 @@ import * as browser from '../differential/strict-browser.js'
 import * as compiler from '../index.js'
 
 test('B7a: the rule 17 family checks all contexts, call paths and source seams in Chromium', async () => {
-	expect(rule17Cases()).toHaveLength(336)
+	expect(rule17Cases()).toHaveLength(896)
 	const argv = process.argv
 	process.argv = [argv[0]!, 'differential/rule17-run.ts']
 	let report
 	try { report = (await import('../differential/rule17-run.js')).report }
 	finally { process.argv = argv }
-	expect(report.cases).toBe(336)
-	expect(report.accepted).toBe(272)
-	expect(report.refused).toBe(64)
-	expect(report.observed).toBe(272)
+	expect(report.cases).toBe(896)
+	expect(report.accepted).toBe(664)
+	expect(report.refused).toBe(232)
+	expect(report.observed).toBe(664)
 	expect(report.failures).toEqual([])
 }, 56000)
 
@@ -32,7 +32,9 @@ test('B7a: rule 17 oracle detects lost or misplaced markers, missing refusals an
 		} finally { compile.mockRestore() }
 		const invalid = spyOn(compiler, 'default').mockRejectedValue(new compiler.GalleyDiagnosticError({ code: 'G9999', severity: 'error', message: 'planted refusal', span: { source: { id: 'fault', text: '' }, start: 0, end: 0 } }))
 		try {
-			expect((await rule17Family()).failures).toHaveLength(336)
+			expect((await rule17Family()).failures).toHaveLength(896)
+			invalid.mockRejectedValue(new compiler.GalleyDiagnosticError({ code: 'G3019', severity: 'error', message: 'wrong location', span: { source: { id: 'fault', text: 'xx' }, start: 1, end: 2 } }))
+			expect((await rule17Family()).failures.some(item => item.detail === 'Unexpected refusal location')).toBe(true)
 			invalid.mockRejectedValue(new Error('compiler unavailable'))
 			await expect(rule17Family()).rejects.toThrow('compiler unavailable')
 		} finally { invalid.mockRestore() }

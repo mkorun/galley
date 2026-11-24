@@ -23,6 +23,10 @@ export interface IncludeResolver {
 export interface CompileOptions extends LintOptions {
     readonly includes?: IncludeResolver;
     readonly sourceId?: string;
+    /** Refuse unescaped literal braces outside script and style. Default: false. */
+    readonly strictBraces?: boolean;
+    /** Check written, iterated, bound and initial pipe values for undefined. Default: false. */
+    readonly strictUndefined?: boolean;
     readonly strip?: boolean;
     readonly debug?: boolean;
     readonly stripEmptyMeta?: boolean;

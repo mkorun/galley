@@ -1,3 +1,4 @@
+import type { SourceSpan } from './types.js'
 import { LOOP_METADATA } from './ast.js'
 import type { LoopMetadata, Expression, IfBranch, SnippetNode, TemplateAst, TemplateNode } from './ast.js'
 
@@ -23,9 +24,10 @@ export const contains = (nodes: readonly TemplateNode[], kind: 'partial' | 'js')
 	|| (node.kind === 'each' && contains(node.fallback ?? [], kind)),
 )
 
-/** Snippets callable by a visible JS block need a plain function binding as well as their variants. */
-export const scriptedSnippets = (nodes: readonly TemplateNode[]): ReadonlySet<SnippetNode> => {
-	const scripted = new Set<SnippetNode>()
+/** Snippets callable by visible JS need a binding. Span identities survive strip and other node copies. */
+export const scriptedSnippets = (nodes: readonly TemplateNode[]): ReadonlySet<SourceSpan> => {
+	const scripted = new Set<SourceSpan>()
+	if (!contains(nodes, 'js')) return scripted
 	// Only unmarked visible bindings need a visit at a JS block. Shadowing temporarily hides them.
 	const visible = new Map<string, SnippetNode>(), unmarked = new Set<SnippetNode>()
 	const visit = (nodes: readonly TemplateNode[], sameScope = false): void => {
@@ -44,7 +46,7 @@ export const scriptedSnippets = (nodes: readonly TemplateNode[]): ReadonlySet<Sn
 		}
 		for (const node of nodes) {
 			if (node.kind === 'js') {
-				for (const binding of unmarked) scripted.add(binding)
+				for (const binding of unmarked) scripted.add(binding.span)
 				unmarked.clear()
 			} else if (node.kind === 'partial') visit(node.children ?? [], true)
 			else if (node.kind === 'if') for (const branch of node.branches) visit(branch.children)
@@ -54,7 +56,7 @@ export const scriptedSnippets = (nodes: readonly TemplateNode[]): ReadonlySet<Sn
 		for (const [name, binding] of local) { visible.delete(name); unmarked.delete(binding) }
 		for (const [name, binding] of previous) {
 			visible.set(name, binding)
-			if (!scripted.has(binding)) unmarked.add(binding)
+			if (!scripted.has(binding.span)) unmarked.add(binding)
 		}
 	}
 	visit(nodes)

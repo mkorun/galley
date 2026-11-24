@@ -60,10 +60,9 @@ interface Binding { readonly node: SnippetNode; readonly scope: Scope; readonly 
 interface Scope { readonly parent: Scope | null; readonly bindings: Map<string, Binding> }
 
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
-export const readContexts = (ast: TemplateAst): TemplateAst => {
+export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = scriptedSnippets(ast.children)): TemplateAst => {
 	let identity = 0, sequence = 0
 	const starts: { value: ValueRecord; text: string; at: (offset: number) => SourceSpan; forbidden: boolean }[] = []
-	const scripted = scriptedSnippets(ast.children)
 	const variants = new Map<string, Variant>()
 	const actualWrites = new Set<ValueRecord>()
 	const renderWrites: { value: ValueRecord; name: string }[] = []
@@ -206,7 +205,7 @@ export const readContexts = (ast: TemplateAst): TemplateAst => {
 						sourceOffset += spans[sourcePart]!.end - spans[sourcePart]!.start; sourcePart++
 					}
 					const part = spans[sourcePart]!
-					const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset)
+					const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset, strictBraces)
 					if (diagnostic) throw new GalleyDiagnosticError(diagnostic)
 				}
 				brace = value.indexOf('{', brace + 1)
@@ -281,7 +280,7 @@ export const readContexts = (ast: TemplateAst): TemplateAst => {
 			if (node.kind === 'snippet') {
 				boundary(context, node.span)
 				const binding = scope.bindings.get(node.name)!
-				result.push({ ...node, variants: binding.list, ...(scripted.has(node) ? { js: specialize(binding, data(), node.span) } : {}) }); continue
+				result.push({ ...node, variants: binding.list, ...(scripted.has(node.span) ? { js: specialize(binding, data(), node.span) } : {}) }); continue
 			}
 			if (node.kind === 'output' || node.kind === 'js') { result.push({ ...node, slot: slot(context, node.span, node.kind === 'js' || node.raw) }); continue }
 			boundary(context, node.span, node.kind === 'render' ? 'G3009' : node.kind === 'partial' ? 'G3011' : 'G3010')

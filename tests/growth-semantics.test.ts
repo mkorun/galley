@@ -36,7 +36,7 @@ test('scripted snippet marking visits each binding once across repeated JS and n
 	for (const children of [ast.children, nested]) {
 		let visits = 0
 		const spy = spyOn(Set.prototype, 'add').mockImplementation(function (this: Set<unknown>, value: unknown) {
-			if (typeof value === 'object' && value !== null && 'kind' in value && value.kind === 'snippet') visits++
+			if (typeof value === 'object' && value !== null && (('kind' in value && value.kind === 'snippet') || ('source' in value && 'start' in value && 'end' in value))) visits++
 			return add.call(this, value)
 		})
 		try {

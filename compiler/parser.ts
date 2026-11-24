@@ -9,17 +9,18 @@ import type { Diagnostic, SourceFile, SourceSpan } from './types.js'
 
 // Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
 const literalBraces = new WeakMap<SourceFile, Map<number, Diagnostic>>()
-export const braceDiagnostic = (source: SourceFile, offset: number): Diagnostic | undefined => {
+export const braceDiagnostic = (source: SourceFile, offset: number, strictBraces = false): Diagnostic | undefined => {
 	const braces = literalBraces.get(source)
 	if (!braces) throw new Error(`Missing brace diagnostics for ${source.id}; parse the source before reading its HTML context`)
-	return braces.get(offset)
+	if (source.text[offset - 1] === '\\') return undefined
+	const reason = braces.get(offset)
+	if (!strictBraces && reason?.code !== 'G1007') return undefined
+	return { code: 'G3019', severity: 'error', message: `Literal { in text: ${reason?.message ?? (source.text.indexOf('}', offset + 1) < 0 ? 'no closing }' : 'a tag begins with a name, #, :, / or @')}`, span: span(source, offset, offset + 1), help: reason?.code === 'G1007' ? 'Write \\{ for a literal brace, or use $. to reach a data key with :, + or -.' : 'Write \\{ for a literal brace. Arithmetic, the ternary operator and method calls are not part of galley.' }
 }
 
-const expressionSpan = (token: Token, raw: string): SourceSpan => {
-	const local = token.value.indexOf(raw)
-	const start = local < 0 ? token.span.start : token.valueStart + local
-	return span(token.span.source, start, local < 0 ? token.span.end : start + raw.length)
-}
+// The lexer trims token values. Callers retain the expression's offset from their grammar slice.
+const expressionSpan = (token: Token, offset: number, length = token.value.length - offset): SourceSpan =>
+	span(token.span.source, token.valueStart + offset, token.valueStart + offset + length)
 
 /** Lexical removals and ADR-015 can leave a seam inside literal HTML. Read it as one text. */
 const joinTexts = (nodes: readonly TemplateNode[]): TemplateNode[] => {
@@ -80,10 +81,11 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 			switch (token.kind) {
 				case 'text': children.push({ kind: 'text', value: token.value, span: span(source, token.valueStart, token.valueStart + token.value.length) }); break
 				case 'expression': {
-					try { children.push({ kind: 'output', expression: parseExpression(token.value, expressionSpan(token, token.value)), raw: false, span: token.span }) }
+					try { children.push({ kind: 'output', expression: parseExpression(token.value, expressionSpan(token, 0)), raw: false, span: token.span }) }
 					catch (error) {
 						if (!(error instanceof GalleyDiagnosticError)) throw error
-						if (error.diagnostic.code === 'G1007') braces.set(token.span.start, { code: 'G3019', severity: 'error', message: `Literal { in text: ${error.diagnostic.message}`, span: span(source, token.span.start, token.span.start + 1), help: `Write \\{ for a literal brace, or use $. to reach a data key with :, + or -.` })
+						if (error.diagnostic.code === 'G1106') throw error
+						braces.set(token.span.start, error.diagnostic)
 						// ADR-015: an expression-shaped CSS/JS collision remains literal text.
 						children.push({ kind: 'text', value: token.span.source.text.slice(token.span.start, token.span.end), span: token.span })
 					}
@@ -108,7 +110,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 		const space = token.value.search(/\s/)
 		const name = space < 0 ? token.value : token.value.slice(0, space)
 		const arg = space < 0 ? '' : token.value.slice(space).trim()
-		const at = expressionSpan(token, arg)
+		const at = expressionSpan(token, token.value.length - arg.length)
 		switch (name) {
 			case 'raw':
 				if (!arg) fail('G2101', '{@raw} requires an expression', token.span, 'Example: {@raw markup}')
@@ -126,10 +128,11 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 				const rawExpression = arg.slice(equals + 1).trim()
 				if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable)) fail('G2104', `Invalid variable name in {@const}: ${JSON.stringify(variable)}`, token.span)
 				if (!rawExpression) fail('G2105', `Const ${variable} requires a value`, token.span)
-				try { return { kind: 'const', name: variable, expression: parseExpression(rawExpression, expressionSpan(token, rawExpression)), span: token.span } }
+				const valueAt = expressionSpan(token, token.value.length - rawExpression.length)
+				try { return { kind: 'const', name: variable, expression: parseExpression(rawExpression, valueAt), span: token.span } }
 				catch (error) {
-					if (!(error instanceof GalleyDiagnosticError)) throw error
-					return fail('G2108', `Invalid expression in {@const ${arg}}`, expressionSpan(token, rawExpression), error.diagnostic.message)
+					if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106') throw error
+					return fail('G2108', `Invalid expression in {@const ${arg}}`, valueAt, error.diagnostic.message)
 				}
 			}
 			case 'render': {
@@ -157,7 +160,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 		const conditionRaw = opening.value.slice(2).trim()
 		if (!conditionRaw) fail('G2201', '{#if} requires a condition', opening.span)
 		const branches: IfBranch[] = []
-		let condition = parseExpression(conditionRaw, expressionSpan(opening, conditionRaw))
+		let condition = parseExpression(conditionRaw, expressionSpan(opening, opening.value.length - conditionRaw.length))
 		while (true) {
 			const result = parseChildren('if', 'if')
 			branches.push({ condition, children: result.children, span: opening.span })
@@ -172,7 +175,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 				return { kind: 'if', branches, span: span(opening.span.source, opening.span.start, finalStop.span.end) }
 			}
 			const nextRaw = stop.value.slice(7).trim()
-			condition = parseExpression(nextRaw, expressionSpan(stop, nextRaw))
+			condition = parseExpression(nextRaw, expressionSpan(stop, stop.value.length - nextRaw.length))
 		}
 	}
 
@@ -188,11 +191,12 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 		if (index && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(index)) fail('G2212', `Invalid index name ${JSON.stringify(index)}`, opening.span)
 		for (const name of [item, index]) if (LOOP_METADATA.includes(name as LoopMetadata)) fail('G2213', `Loop name ${name} collides with loop metadata`, opening.span, 'Choose another item or index name.')
 		if (index === item) fail('G2214', 'Item and index names must differ', opening.span)
+		const collectionAt = expressionSpan(opening, opening.value.length - body.length, collectionRaw.length)
 		let collection: PathExpression
-		try { collection = parsePath(collectionRaw, expressionSpan(opening, collectionRaw)); checkPathRoots(collection) }
+		try { collection = parsePath(collectionRaw, collectionAt); checkPathRoots(collection) }
 		catch (error) {
 			if (!(error instanceof GalleyDiagnosticError)) throw error
-			return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, expressionSpan(opening, collectionRaw), error.diagnostic.message)
+			return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, collectionAt, error.diagnostic.message)
 		}
 		const result = parseChildren('each', 'each')
 		const stop = result.stop ?? fail('G2215', `Unclosed {#each ${body}}`, opening.span, 'Add {/each} after the loop.')

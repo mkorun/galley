@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Lone-quote string literals in 0.4.0 and earlier could smuggle arbitrary JS into the generated render function,
+  independent of `allowCode`. String literals now require both quotes and are generated from their parsed values;
+  lone quotes are rejected in directives and remain literal text in outputs that do not parse.
+- Locate expression spans from their positions in template tags, so repeated binding or keyword text cannot
+  move diagnostics to an earlier occurrence. `{@const title = title}` now reports G5002 at column 17.
+  Pipes inside parentheses or arguments exclude surrounding whitespace, so G5002 and G3022 point at the first
+  character of the expression and G5002 names it without the surrounding blanks.
+- Reject leading-zero numeric literals such as `007` and `-01` with G1106 at the literal and a suggested spelling,
+  instead of leaking the JavaScript engine's SyntaxError.
+- Parse comparisons beginning and ending with quoted operands, such as `'x' === 'y'`, as expressions.
+  Outputs containing one, such as `{ a || 'x' === 'y' }`, were literal text and now render a value; write `\{`
+  to keep them as text. A single string literal containing its own quote or an escape remains G1101.
+
 - Discover surrounding loop metadata in nested `{#each}` collection paths, including computed segments deeper in a path.
   `lists[length]`, `lists[position]`, `lists[isFirst]` and `lists[isLast]` now use the enclosing loop's
   bindings even when no other expression reads them; output paths retain their existing behavior.
@@ -57,6 +70,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becomes literal text: CSS `{margin:0}` is retained, and a former `{ user-name }` interpolation stays as written.
 
 ### Added
+
+- B8: `strictUndefined` (default false) stops renders with G5002 and the expression/source place for undefined
+  output, each collections, const values and initial pipe inputs outside conditions. Checks evaluate once;
+  conditions, direct snippet arguments, filter arguments and intermediate results retain their lenient contracts.
+
+- B7b: `strictBraces` (default false) refuses every malformed unescaped `{` outside script/style with G3019,
+  including through snippets and partials. `lint()` reports the same source location and reason; write `\{` for text.
 
 - B9: one-based `position` for array and object loops, generated only when referenced.
   Nested loops own it; empty fallbacks retain the surrounding binding.

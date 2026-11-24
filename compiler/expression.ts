@@ -29,16 +29,17 @@ const trimSpan = (raw: string, at: SourceSpan): { text: string; span: SourceSpan
 }
 
 const literal = (raw: string, at: SourceSpan): LiteralExpression | null => {
-	if ((raw[0] === "'" && raw.at(-1) === "'") || (raw[0] === '"' && raw.at(-1) === '"')) {
+	if (raw.length > 1 && ((raw[0] === "'" && raw.at(-1) === "'") || (raw[0] === '"' && raw.at(-1) === '"'))) {
 		const quote = raw[0]
 		const body = raw.slice(1, -1)
 		if (body.includes(quote) || body.includes('\\')) fail('G1101', 'String literals may not contain quotes or escapes', at)
 		if (/[\n\r\u2028\u2029]/.test(body)) fail('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.')
 		return { kind: 'literal', value: body, raw, span: at }
 	}
-	const first = raw.charCodeAt(0)
-	if ((first === 45 || (first >= 48 && first <= 57)) && /^-?\d+(?:\.\d+)?$/.test(raw))
+	if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+		if (/^-?0\d/.test(raw)) fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`)
 		return { kind: 'literal', value: Number(raw), raw, span: at }
+	}
 	if (raw === 'true' || raw === 'false') return { kind: 'literal', value: raw === 'true', raw, span: at }
 	if (raw === 'null') return { kind: 'literal', value: null, raw, span: at }
 	if (raw === 'undefined') return { kind: 'literal', value: undefined, raw, span: at }
@@ -95,11 +96,9 @@ const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 	const { text: raw, span: at } = trimSpan(rawInput, atInput)
 	if (!raw) fail('G1100', 'Expected an expression', at)
 	if (hasOuterParentheses(raw)) return { ...parsePiped(raw.slice(1, -1), span(at.source, at.start + 1, at.end - 1)), parenthesized: true }
-	const literalNode = literal(raw, at)
-	if (literalNode) return literalNode
 	// The dominant template expression is a plain path. Avoid the operator
 	// scanner entirely when no operator-leading character occurs.
-	if (!/[?&|=!<>]/.test(raw)) return parsePath(raw, at)
+	if (!/[?&|=!<>]/.test(raw)) return literal(raw, at) ?? parsePath(raw, at)
 	let selected: { operator: Operator; position: number; precedence: number } | null = null
 	let quote = '', depth = 0
 	for (let i = 0; i < raw.length; i++) {
@@ -128,22 +127,23 @@ const parseCore = (rawInput: string, atInput: SourceSpan): Expression => {
 		const node: UnaryExpression = { kind: 'unary', operator: '!', operand: parseCore(raw.slice(1), operandAt), span: at }
 		return node
 	}
-	return parsePath(raw, at)
+	return literal(raw, at) ?? parsePath(raw, at)
 }
 
 const parsePiped = (rawInput: string, atInput: SourceSpan): Expression => {
 	if (!rawInput.includes('|')) return parseCore(rawInput, atInput)
-	const pipePositions = splitTopLevel(rawInput, '|').filter(i => rawInput[i - 1] !== '|' && rawInput[i + 1] !== '|')
-	if (!pipePositions.length) return parseCore(rawInput, atInput)
-	const first = pipePositions[0] ?? fail('G1199', 'Internal pipe parser error', atInput)
-	const input = parseCore(rawInput.slice(0, first), span(atInput.source, atInput.start, atInput.start + first))
+	const { text: raw, span: at } = trimSpan(rawInput, atInput)
+	const pipePositions = splitTopLevel(raw, '|').filter(i => raw[i - 1] !== '|' && raw[i + 1] !== '|')
+	if (!pipePositions.length) return parseCore(raw, at)
+	const first = pipePositions[0] ?? fail('G1199', 'Internal pipe parser error', at)
+	const input = parseCore(raw.slice(0, first), span(at.source, at.start, at.start + first))
 	const pipes: PipeCall[] = []
 	let start = first + 1
-	for (const end of [...pipePositions.slice(1), rawInput.length]) {
-		pipes.push(parsePipe(rawInput.slice(start, end), span(atInput.source, atInput.start + start, atInput.start + end)))
+	for (const end of [...pipePositions.slice(1), raw.length]) {
+		pipes.push(parsePipe(raw.slice(start, end), span(at.source, at.start + start, at.start + end)))
 		start = end + 1
 	}
-	const node: PipeExpression = { kind: 'pipe', input, pipes, span: atInput }
+	const node: PipeExpression = { kind: 'pipe', input, pipes, span: at }
 	return node
 }
 

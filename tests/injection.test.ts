@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { lint } from '../index'
+import galley, { GalleyDiagnosticError, lint } from '../index'
 import { render } from './helpers'
 
 // Regression tests for three code-injection vectors found in review (2026-08-17):
@@ -109,6 +109,48 @@ describe('comparison RHS rejects code injection disguised as a string literal', 
 		expect(await render('{#if a === b}equal{/if}', { a: 'x', b: 'x' })).toBe('equal')
 	})
 
+})
+
+describe('string literals require two quotes and generate code from their values', () => {
+	test('lone quotes are diagnostics in directives and literal text in outputs', async () => {
+		for (const quote of ["'", '"']) {
+			for (const [source, code] of [[`{#if ${quote}}x{/if}`, 'G1001'], [`{@const x = ${quote}}a`, 'G2108'], [`{@raw value | oneOf(${quote})}`, 'G1001']]) {
+				const error = await galley(source!).catch(error => error)
+				expect(error).toBeInstanceOf(GalleyDiagnosticError)
+				expect(error.diagnostic.code).toBe(code)
+				expect((await lint(source!))[0]).toEqual(error.diagnostic)
+			}
+			for (const source of [`{ ${quote} }`, `{ value | oneOf(${quote}) }`]) {
+				expect((await galley(source)).render({ value: 'x' })).toBe(source)
+				expect(await lint(source)).toEqual([])
+			}
+		}
+	})
+
+	test('two blocks with lone quotes cannot turn intervening text into JavaScript', async () => {
+		const target = globalThis as typeof globalThis & { canary?: string }
+		delete target.canary
+		try {
+			for (const quote of ["'", '"']) {
+				const source = `{#if a === ${quote}}+(globalThis.canary=\`ran without allowCode\`)+{/if}{#if b === ${quote}}x{/if}`
+				const result = await galley(source, { allowCode: false }).catch(error => error)
+				if (!(result instanceof Error)) result.render({})
+				expect(target.canary).toBeUndefined()
+				expect(result).toBeInstanceOf(GalleyDiagnosticError)
+				expect(result.diagnostic.code).toBe('G1001')
+				expect((await lint(source))[0]).toEqual(result.diagnostic)
+			}
+		} finally {
+			delete target.canary
+		}
+	})
+
+	test('generated string literals serialize the parsed value', async () => {
+		const template = await galley(`{@const text = 'a"b'}{ text }`, { debug: true })
+		expect(template.render({})).toBe('a&quot;b')
+		expect(template.source).toContain(JSON.stringify('a"b'))
+		for (const literal of ["''", '""']) expect((await galley(`{@raw ${literal}}`)).render({})).toBe('')
+	})
 })
 
 describe('special data keys require a root path and never become generated JavaScript', () => {

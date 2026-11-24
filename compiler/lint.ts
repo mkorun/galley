@@ -1,6 +1,5 @@
 import { LOOP_METADATA } from './ast.js'
-import type { Expression, TemplateAst, TemplateNode } from './ast.js'
-import { scriptedSnippets } from './analysis.js'
+import type { LoopMetadata, Expression, TemplateAst, TemplateNode } from './ast.js'
 import { locate } from './diagnostics.js'
 import type { Diagnostic, FilterMap, LintOptions, SourceSpan } from './types.js'
 
@@ -8,14 +7,13 @@ import type { Diagnostic, FilterMap, LintOptions, SourceSpan } from './types.js'
 const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined'])
 const invalidNames = new Map<string, boolean>()
 
-export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterMap): readonly Diagnostic[] => {
+export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterMap, scripted: ReadonlySet<SourceSpan>): readonly Diagnostic[] => {
 	const diagnostics: Diagnostic[] = []
 	type Snippet = TemplateNode & { kind: 'snippet' }
-	interface Scope { readonly parent: Scope | null; readonly snippets: Map<string, Snippet>; readonly names: Map<string, readonly SourceSpan[]> }
+	interface Scope { readonly parent: Scope | null; readonly snippets: Map<string, Snippet>; names: Map<string, readonly SourceSpan[]> | undefined; readonly loop: SourceSpan | undefined; readonly partials: readonly SourceSpan[] }
 	const declarations = new Set<Snippet>()
 	const used = new Set<Snippet>()
 	const duplicate = new Set<Snippet>()
-	const scripted = scriptedSnippets(ast.children)
 	const binding = (name: string, at: SourceSpan): void => {
 		if (!invalidNames.has(name)) {
 			let invalid = GENERATED_GLOBALS.has(name)
@@ -54,7 +52,7 @@ export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterM
 		const { line, column } = locate(at.source, at.start)
 		return `${index < sites.length - 1 ? at.source.text.slice(at.start, at.end) + ' at ' : ''}${at.source.id}:${line}:${column}`
 	}).join(' -> ')
-	const visit = (nodes: readonly TemplateNode[], parent: Scope | null, sameScope = false, names = new Map<string, readonly SourceSpan[]>(), partials: readonly SourceSpan[] = []) => {
+	const visit = (nodes: readonly TemplateNode[], parent: Scope | null, sameScope = false, names?: Map<string, readonly SourceSpan[]>, partials: readonly SourceSpan[] = [], loop?: SourceSpan) => {
 		const local = sameScope ? parent!.snippets : new Map<string, Snippet>()
 		const declare = (items: readonly TemplateNode[]): void => {
 			for (const node of items) {
@@ -68,12 +66,13 @@ export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterM
 			}
 		}
 		if (!sameScope) declare(nodes)
-		const scope: Scope = sameScope ? parent! : { parent, snippets: local, names }
+		const scope: Scope = sameScope ? parent! : { parent, snippets: local, names, loop, partials }
 		for (const node of nodes) {
-			if (node.kind === 'const' || (node.kind === 'snippet' && scripted.has(node))) {
+			if (node.kind === 'const' || (node.kind === 'snippet' && scripted.has(node.span))) {
 				binding(node.name, node.span)
-				const sites = [...partials, node.span], previous = scope.names.get(node.name)
+				const sites = [...partials, node.span], previous = scope.names?.get(node.name) ?? (scope.loop && LOOP_METADATA.includes(node.name as LoopMetadata) ? [...scope.partials, scope.loop] : undefined)
 				if (previous) report({ code: 'G3021', severity: 'error', message: `The name ${node.name} is declared twice in the same generated scope: ${declaration(previous)} and ${declaration(sites)}`, span: node.span, help: 'Use distinct names or put the declarations or partial inclusions in separate blocks.' })
+				scope.names ??= new Map()
 				scope.names.set(node.name, sites)
 			}
 			switch (node.kind) {
@@ -82,7 +81,7 @@ export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterM
 				case 'if': for (const branch of node.branches) { if (branch.condition) expression(branch.condition); visit(branch.children, scope, false, undefined, partials) } break
 				case 'each':
 					binding(node.item, node.span); if (node.index) binding(node.index, node.span)
-					visit(node.children, scope, false, new Map(LOOP_METADATA.map(name => [name, [...partials, node.span]])), partials);
+					visit(node.children, scope, false, undefined, partials, node.span);
 					if (node.fallback) visit(node.fallback, scope, false, undefined, partials); break
 				case 'partial': if (node.children) visit(node.children, scope, true, undefined, [...partials, node.span]); break
 				case 'snippet': {

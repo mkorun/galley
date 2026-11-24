@@ -6,6 +6,7 @@ export interface GeneratedProgram {
     readonly places: readonly SourceSpan[];
 }
 export declare const generate: (ast: TemplateAst, options?: {
+    readonly strictUndefined?: boolean;
     readonly allowCode?: boolean;
     readonly strip?: boolean;
     readonly stripEmptyMeta?: boolean;
