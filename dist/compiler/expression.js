@@ -1,5 +1,5 @@
 import { fail, span } from './diagnostics.js';
-import { checkPathRoots, parsePath } from './path.js';
+import { checkPathRoots, parseNumber, parsePath } from './path.js';
 const PRECEDENCE = { '??': 1, '||': 2, '&&': 3, '===': 4, '!==': 4, '>': 4, '<': 4, '>=': 4, '<=': 4 };
 const ORDERED_OPERATORS = ['===', '!==', '>=', '<=', '??', '||', '&&', '>', '<'];
 const splitTopLevel = (raw, separator) => {
@@ -49,11 +49,8 @@ const literal = (raw, at) => {
             fail('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.');
         return { kind: 'literal', value: body, raw, span: at };
     }
-    if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
-        if (/^-?0\d/.test(raw))
-            fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`);
-        return { kind: 'literal', value: Number(raw), raw, span: at };
-    }
+    if (/^-?\d+(?:\.\d+)?$/.test(raw))
+        return { kind: 'literal', value: parseNumber(raw, at), raw, span: at };
     if (raw === 'true' || raw === 'false')
         return { kind: 'literal', value: raw === 'true', raw, span: at };
     if (raw === 'null')

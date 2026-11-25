@@ -51,3 +51,52 @@ test('outputs containing quoted comparisons render values; escaping the brace pr
 		expect((await galley(escaped)).render({ a: 0 })).toBe(source)
 	}
 })
+
+const numberError = async (source: string, number: string, code: string, help: string) => {
+	const error = await galley(source).catch(error => error)
+	expect(error).toBeInstanceOf(GalleyDiagnosticError)
+	expect(error.diagnostic.code).toBe(code)
+	expect(error.diagnostic.span.start).toBe(source.indexOf(number))
+	expect(error.diagnostic.span.end).toBe(source.indexOf(number) + number.length)
+	expect(error.diagnostic.help).toBe(help)
+	expect((await lint(source))[0]).toEqual(error.diagnostic)
+	return error.diagnostic.message as string
+}
+const placements = (path: string) => [`{ ${path} }`, `{@raw ${path}}`, `{@const x = ${path}}`, `{#if ${path}}y{/if}`, `{#each ${path} as x}{/each}`, `{#snippet s(x)}{ x }{/snippet}{@render s(${path})}`]
+
+test('G1106: a leading zero in brackets is refused as in a literal, with the same message and spelling', async () => {
+	for (const [number, replacement] of [['007', '7'], ['-01', '-1'], ['00', '0'], ['-00', '-0']]) {
+		for (const path of [`a[${number}]`, `a[ ${number} ]`, `a.b[${number}].c`]) {
+			for (const source of placements(path)) {
+				expect(await numberError(source, number, 'G1106', `Write ${replacement} without leading zeros.`)).toBe(`Number ${number} has a leading zero`)
+			}
+		}
+	}
+})
+
+test('G1107: a number beyond Number.MAX_SAFE_INTEGER is refused in brackets and as a literal', async () => {
+	const help = 'Write it as a quoted string, or pass it in template data.'
+	const nines = '9'.repeat(310)
+	for (const number of ['9007199254740992', '9007199254740993', '-9007199254740993', '1000000000000000000000', nines]) {
+		for (const source of placements(`a[${number}]`)) {
+			expect(await numberError(source, number, 'G1107', help)).toBe(`Number ${number} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`)
+		}
+	}
+	for (const number of ['9007199254740992', '9007199254740993', '-9007199254740993', '9007199254740991.5', '1000000000000000000000', nines, `${nines}.5`]) {
+		for (const source of [`{@raw ${number}}`, `{#if n === ${number}}y{/if}`, `{@const n = ${number}}`, `{ n ?? ${number} }`, `{ n | oneOf(${number}) }`]) await numberError(source, number, 'G1107', help)
+	}
+	// 0.5.0 wrote Infinity as an identifier that a constant could shadow.
+	await numberError(`{@const Infinity = 'x'}{ a[${nines}] }`, nines, 'G1107', help)
+})
+
+test('a safe integer in brackets reaches the generated code as the integer the template wrote', async () => {
+	const a = { '9007199254740991': 'max', '-9007199254740991': 'min', '7': 'seven', '0': 'zero' }
+	for (const [path, expected] of [['a[9007199254740991]', 'max'], ['a[-9007199254740991]', 'min'], ['a[ 7 ]', 'seven'], ['a[0]', 'zero'], ['a[-0]', 'zero']]) {
+		const source = `{ ${path} }`
+		expect(await lint(source)).toEqual([])
+		const template = await galley(source, { debug: true })
+		expect(template.render({ a })).toBe(expected)
+		expect(template.source).toContain(`?.[${path.slice(2, -1).trim().replace('-0', '0')}]`)
+	}
+	for (const number of ['9007199254740991', '-9007199254740991']) expect((await galley(`{@raw ${number}}`)).render({})).toBe(String(Number(number)))
+})

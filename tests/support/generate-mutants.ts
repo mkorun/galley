@@ -39,12 +39,12 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
 	] : file.endsWith('index.ts') ? [[source.indexOf('const codeAllowed'), source.length]] : file.endsWith('parser.ts') ? [
-		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')"), source.indexOf("return fail('G2108'")],
+		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code)) throw error\n\t\t\t\t\treturn fail('G2108'"), source.indexOf("return fail('G2108'")],
 		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
 		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
 		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
 		[source.indexOf('const literalBraces'), source.indexOf('/** Lexical removals')],
-		[source.indexOf("if (error.diagnostic.code === 'G1106')"), source.indexOf('// ADR-015:')],
+		[source.indexOf('if (isNumberDiagnostic(error.diagnostic.code)) throw error'), source.indexOf('// ADR-015:')],
 		[source.indexOf('const braces = new Map<number'), source.indexOf('// ADR-014')],
 		// B2: which continuation ends a branch, and the each fallback's parse and source span.
 		[source.indexOf('const parseChildren ='), source.indexOf('const children: TemplateNode[]')],

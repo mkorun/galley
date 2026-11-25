@@ -268,8 +268,11 @@ The compiler does not read raw output to discover a new context. The same obliga
 {:else if count > 0}…
 ```
 
-Numeric literals must not have leading zeros: `007` and `-01` are G1106 at the number, with a suggested
-`7` or `-1`. `0`, `-0` and `0.5` are valid. Quoted literals can be operands, as in
+Numbers, as literals and in brackets such as `a[007]`, must not have leading zeros: `007` and `-01` are G1106 at
+the number, with a suggested `7` or `-1`. `0`, `-0` and `0.5` are valid. A number whose magnitude exceeds
+`Number.MAX_SAFE_INTEGER` (9007199254740991), such as `a[9007199254740993]` or `{#if n === 1000000000000000000000}`,
+is G1107 at the number: beyond that bound JavaScript numbers skip integers. Quote a larger key, as in
+`a['9007199254740993']`, or pass a larger number in data. Quoted literals can be operands, as in
 `{#if 'x' === 'y'}`; a single literal containing its own quote or an escape remains G1101.
 
 **Logical operators** (`&&` `||`):

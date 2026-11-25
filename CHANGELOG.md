@@ -3,6 +3,16 @@
 All notable changes to `galley` are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Breaking
+
+- A number in brackets follows the rules of a numeric literal. `a[007]` read `a[7]` and is now G1106 with a
+  suggested `a[7]`. A number beyond `Number.MAX_SAFE_INTEGER` in magnitude, in brackets or as a literal, read a
+  different number (`a[9007199254740993]` read key `9007199254740992`, 310 nines read `Infinity`) and is now G1107;
+  quote such a key, as in `a['9007199254740993']`, or pass the number in data. In `{#each}` collections both are
+  reported as such, not as G2216.
+
 ## [0.5.0] — 2026-11-25
 
 ### Fixed

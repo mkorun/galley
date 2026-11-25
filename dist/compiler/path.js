@@ -1,6 +1,17 @@
 import { fail, span } from './diagnostics.js';
 const isStart = (code) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || code === 36;
 const isSpecial = (code) => isStart(code) || (code >= 48 && code <= 57) || code === 58 || code === 43 || code === 45;
+/** A number the template writes, in brackets or as a literal: without a leading zero, and small enough for the generated code to read exactly. */
+export const parseNumber = (raw, at) => {
+    if (/^-?0\d/.test(raw))
+        fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`);
+    const value = Number(raw);
+    if (Math.abs(value) > Number.MAX_SAFE_INTEGER)
+        fail('G1107', `Number ${raw} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`, at, 'Write it as a quoted string, or pass it in template data.');
+    return value;
+};
+/** Number diagnostics stand where a malformed expression would otherwise become literal text or another diagnostic. */
+export const isNumberDiagnostic = (code) => code === 'G1106' || code === 'G1107';
 /** Check after parsing the complete expression, so an otherwise malformed brace stays literal under ADR-015. */
 export const checkPathRoots = (path) => {
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(path.root))
@@ -58,12 +69,12 @@ export const parsePath = (raw, at) => {
             if (i >= raw.length)
                 fail('G1005', 'Unclosed bracket path', localSpan(start, raw.length));
             const inner = raw.slice(innerStart, i).trim();
+            const innerOffset = raw.indexOf(inner, innerStart);
             i++;
             if (/^-?\d+$/.test(inner)) {
-                segments.push({ kind: 'computed', value: Number(inner), span: localSpan(start, i) });
+                segments.push({ kind: 'computed', value: parseNumber(inner, localSpan(innerOffset, innerOffset + inner.length)), span: localSpan(start, i) });
             }
             else {
-                const innerOffset = raw.indexOf(inner, innerStart);
                 segments.push({ kind: 'computed', value: parsePath(inner, localSpan(innerOffset, innerOffset + inner.length)), span: localSpan(start, i) });
             }
             continue;

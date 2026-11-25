@@ -4,7 +4,7 @@ import { fail, GalleyDiagnosticError, span } from './diagnostics.js'
 import { parseArguments, parseExpression, checkRoots } from './expression.js'
 import { lex, type Token } from './lexer.js'
 import { textSpans } from './text.js'
-import { checkPathRoots, parsePath } from './path.js'
+import { checkPathRoots, isNumberDiagnostic, parsePath } from './path.js'
 import type { Diagnostic, SourceFile, SourceSpan } from './types.js'
 
 // Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
@@ -84,7 +84,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 					try { children.push({ kind: 'output', expression: parseExpression(token.value, expressionSpan(token, 0)), raw: false, span: token.span }) }
 					catch (error) {
 						if (!(error instanceof GalleyDiagnosticError)) throw error
-						if (error.diagnostic.code === 'G1106') throw error
+						if (isNumberDiagnostic(error.diagnostic.code)) throw error
 						braces.set(token.span.start, error.diagnostic)
 						// ADR-015: an expression-shaped CSS/JS collision remains literal text.
 						children.push({ kind: 'text', value: token.span.source.text.slice(token.span.start, token.span.end), span: token.span })
@@ -131,7 +131,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 				const valueAt = expressionSpan(token, token.value.length - rawExpression.length)
 				try { return { kind: 'const', name: variable, expression: parseExpression(rawExpression, valueAt), span: token.span } }
 				catch (error) {
-					if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106') throw error
+					if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code)) throw error
 					return fail('G2108', `Invalid expression in {@const ${arg}}`, valueAt, error.diagnostic.message)
 				}
 			}
@@ -195,7 +195,7 @@ export const parseTokens = (source: SourceFile, input: readonly Token[]): Templa
 		let collection: PathExpression
 		try { collection = parsePath(collectionRaw, collectionAt); checkPathRoots(collection) }
 		catch (error) {
-			if (!(error instanceof GalleyDiagnosticError)) throw error
+			if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code)) throw error
 			return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, collectionAt, error.diagnostic.message)
 		}
 		const result = parseChildren('each', 'each')

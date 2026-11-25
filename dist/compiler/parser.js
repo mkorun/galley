@@ -3,7 +3,7 @@ import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
 import { parseArguments, parseExpression, checkRoots } from './expression.js';
 import { lex } from './lexer.js';
 import { textSpans } from './text.js';
-import { checkPathRoots, parsePath } from './path.js';
+import { checkPathRoots, isNumberDiagnostic, parsePath } from './path.js';
 // Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
 const literalBraces = new WeakMap();
 export const braceDiagnostic = (source, offset, strictBraces = false) => {
@@ -97,7 +97,7 @@ export const parseTokens = (source, input) => {
                     catch (error) {
                         if (!(error instanceof GalleyDiagnosticError))
                             throw error;
-                        if (error.diagnostic.code === 'G1106')
+                        if (isNumberDiagnostic(error.diagnostic.code))
                             throw error;
                         braces.set(token.span.start, error.diagnostic);
                         // ADR-015: an expression-shaped CSS/JS collision remains literal text.
@@ -158,7 +158,7 @@ export const parseTokens = (source, input) => {
                     return { kind: 'const', name: variable, expression: parseExpression(rawExpression, valueAt), span: token.span };
                 }
                 catch (error) {
-                    if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')
+                    if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code))
                         throw error;
                     return fail('G2108', `Invalid expression in {@const ${arg}}`, valueAt, error.diagnostic.message);
                 }
@@ -237,7 +237,7 @@ export const parseTokens = (source, input) => {
             checkPathRoots(collection);
         }
         catch (error) {
-            if (!(error instanceof GalleyDiagnosticError))
+            if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code))
                 throw error;
             return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, collectionAt, error.diagnostic.message);
         }
