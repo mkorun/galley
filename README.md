@@ -744,7 +744,7 @@ it treats each partial as preserving its context and continues checking the surr
   trailing whitespace. It leaves dynamic values untouched. The `util.stripWhitespace` export remains available for callers.
 - **`stripEmptyMeta` uses compiled tag captures.** It removes a real `meta[content]` or `link[href]` only when its
   first target attribute is empty and an executed dynamic emission participated, including an empty emission.
-  A `{@render}` is one when its snippet can write a dynamic value there; a snippet of static text or nothing is static.
+  A `{@render}` is none by itself: the emissions its snippet executes count, exactly as its body written in place.
   Static empty tags and inactive branches are retained. Removal includes preceding static spaces/tabs and one following static line break, including across block
   boundaries; it never trims whitespace supplied by dynamic values. Complete tags start and finish in ordinary text, so removal preserves the reader's
   context; apparent metadata inside quoted values, comments or text elements stays literal.

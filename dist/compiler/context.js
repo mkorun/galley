@@ -284,7 +284,8 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                 if (value.tag)
                     value.tag.dynamic = true;
             }
-            return { place, url: value?.url != null, metadata: value?.tag != null };
+            // A render marks no metadata tag itself: the outputs in its snippet do when they run, as they would in place.
+            return { place, url: value?.url != null, metadata: !render && value?.tag != null };
         }
         if (context.state === 'data' || context.state === 'text') {
             if (context.strict && (opaque || context.owner === 'script' || context.owner === 'style'))
@@ -412,7 +413,7 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                     const written = slot(context, node.span, false, true);
                     specialization ??= specialize(resolve(scope, node.name), context, node.span);
                     if (context.open) {
-                        renderWrites.push({ value: context.open, name: specialization, slot: written });
+                        renderWrites.push({ value: context.open, name: specialization });
                         if (currentVariant?.value === context.open)
                             variants.get(specialization).startCallers.push(currentVariant);
                     }
@@ -475,9 +476,6 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
         const variant = variants.get(render.name);
         if (variant.writes)
             actualWrites.add(render.value);
-        // A snippet that can write no dynamic value is static text to stripEmptyMeta: its call marks no tag.
-        else
-            render.slot.metadata = false;
         if (variant.start)
             starts.push({ ...variant.start, value: render.value });
     }

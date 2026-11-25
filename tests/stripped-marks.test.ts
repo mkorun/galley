@@ -30,7 +30,7 @@ describe('a value with the marks of stripEmptyMeta', () => {
 describe('a snippet rendered into the target of stripEmptyMeta', () => {
 	const tags = [['<meta name="d" content="', '">'], ['<link rel="x" href="', '">']] as const
 
-	test('marks the tag only when its variant can write a dynamic value', async () => {
+	test('marks the tag only through the dynamic values the snippet writes when it runs', async () => {
 		const kept = [
 			['{#snippet s()}{/snippet}', '{@render s()}', {}, ''],
 			['{#snippet s()}x{/snippet}', '{@render s()}', {}, 'x'],
@@ -38,14 +38,14 @@ describe('a snippet rendered into the target of stripEmptyMeta', () => {
 			['{#snippet s(v)}{#each v as x}y{/each}{/snippet}', '{@render s(v)}', { v: [] }, ''],
 			['{#snippet inner()}{/snippet}{#snippet s()}{@render inner()}{/snippet}', '{@render s()}', {}, ''],
 			['{#snippet inner()}{#if p}x{/if}{/snippet}{#snippet s()}{@render inner()}{/snippet}', '{@render s()}{@render inner()}', { p: false }, ''],
+			['{#snippet s(v)}{#if v}{ v }{/if}{/snippet}', '{@render s(v)}', { v: '' }, ''],
+			['{#snippet inner(v)}{ v }{/snippet}{#snippet s(v)}{#if v}{@render inner(v)}{/if}{/snippet}', '{@render s(v)}', { v: '' }, ''],
 		] as const
 		const removed = [
 			['{#snippet s(v)}{ v }{/snippet}', '{@render s(v)}', { v: '' }],
 			['{#snippet s(v)}{@raw v}{/snippet}', '{@render s(v)}', { v: '' }],
-			['{#snippet s(v)}{#if v}{ v }{/if}{/snippet}', '{@render s(v)}', { v: '' }],
 			['{#snippet s()}{/snippet}', '{@render s()}{ v }', { v: '' }],
 			['{#snippet inner(v)}{ v }{/snippet}{#snippet s(v)}{@render inner(v)}{/snippet}', '{@render s(v)}', { v: '' }],
-			['{#snippet inner(v)}{ v }{/snippet}{#snippet s(v)}{#if v}{@render inner(v)}{/if}{/snippet}', '{@render s(v)}', { v: '' }],
 		] as const
 		for (const [open, close] of tags) {
 			for (const [declarations, value, data, written] of kept) expect(await render(`${declarations}${open}${value}${close}`, data)).toBe(`${open}${written}${close}`)
@@ -53,6 +53,25 @@ describe('a snippet rendered into the target of stripEmptyMeta', () => {
 			// A snippet that does write keeps the tag when the value is not empty.
 			expect(await render(`{#snippet s(v)}{ v }{/snippet}${open}{@render s(v)}${close}`, { v: 'x' })).toBe(`${open}x${close}`)
 		}
+	})
+
+	test('a snippet decides as its body written in place does', async () => {
+		const bodies = ['{#if v}{ v }{/if}', '{ v }', '{@raw v}', '{#if p}x{/if}', 'x', '', '{#if p}{ v }{/if}{ v }', '{#each l as i}{ i }{/each}']
+		for (const [open, close] of tags) for (const body of bodies) for (const data of [{ v: '', p: false, l: [] }, { v: '', p: true, l: [''] }, { v: 'x', p: true, l: ['y'] }]) {
+			const inPlace = await render(`${open}${body}${close}`, data)
+			expect(await render(`{#snippet s()}${body}{/snippet}${open}{@render s()}${close}`, data)).toBe(inPlace)
+			expect(await render(`{#snippet inner()}${body}{/snippet}{#snippet s()}{@render inner()}{/snippet}${open}{@render s()}${close}`, data)).toBe(inPlace)
+		}
+		// Side by side, the case 0.5.0 and the first fix removed: an empty value behind {#if} keeps the tag either way.
+		for (const [open, close] of tags) {
+			expect(await render(`${open}{#if v}{ v }{/if}${close}`, { v: '' })).toBe(`${open}${close}`)
+			expect(await render(`{#snippet s(v)}{#if v}{ v }{/if}{/snippet}${open}{@render s(v)}${close}`, { v: '' })).toBe(`${open}${close}`)
+		}
+	})
+
+	test('one snippet variant marks each tag it is rendered into by itself', async () => {
+		const source = '{#snippet w(v)}{ v }{/snippet}<meta content="{@render w(a)}">\n<meta content="{@render w(b)}">\n<link href="{@render w(b)}">\n<link href="{@render w(a)}">'
+		expect(await render(source, { a: 'x', b: '' })).toBe('<meta content="x">\n<link href="x">')
 	})
 
 	test('the same snippet keeps a separate decision in each tag', async () => {
