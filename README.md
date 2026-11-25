@@ -477,6 +477,7 @@ or to another category.
 | `lower` | `(s)` | Lowercase |
 | `capitalize` | `(s)` | First letter uppercase |
 | `trim` | `(s)` | Trim whitespace |
+| `stripWhitespace` | `(s)` | Remove line feeds and formatting spaces/tabs around tags |
 | `truncate` | `(s, n, suffix?)` | Truncate to n characters (default suffix: `…`) |
 | `replace` | `(s, from, to)` | Replace all occurrences |
 | `striptags` | `(s)` | Strip HTML tags |
@@ -492,6 +493,8 @@ or to another category.
 | `length` | `(arr\|s)` | Length of array or string |
 | `round` | `(n, decimals?)` | Round number |
 | `number` | `(n, locale?)` | Format number with locale |
+| `oneOf` | `(value, ...candidates)` | Match any candidate with `===` |
+| `plural` | `(count, locale, forms)` | Select a CLDR plural form for the supplied locale |
 
 Register custom filters at compile time: `galley(source, { filters: { shout } })`.
 The built-ins are also exported from `@mkorun/galley/util` for direct calls.
