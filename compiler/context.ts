@@ -55,15 +55,21 @@ const staticValue = (context: Context, at: Position): void => {
 		refuse(animation ? 'G3016' : 'G3017', where, context, animation ? '15' : '16', where.source.text.slice(where.start, where.end))
 	}
 }
-interface Variant { readonly name: string; children: readonly TemplateNode[]; writes: boolean }
+interface StaticStart { readonly value: ValueRecord; readonly text: string; readonly at: (offset: number) => SourceSpan; readonly forbidden: boolean }
+interface Variant { readonly name: string; readonly value: ValueRecord | null; readonly startCallers: Variant[]; children: readonly TemplateNode[]; writes: boolean; start: StaticStart | null }
 interface Binding { readonly node: SnippetNode; readonly scope: Scope; readonly list: Variant[]; readonly variants: Map<string, Variant>; active: Context | null }
 interface Scope { readonly parent: Scope | null; readonly bindings: Map<string, Binding> }
 
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
 export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = scriptedSnippets(ast.children)): TemplateAst => {
 	let identity = 0, sequence = 0
-	const starts: { value: ValueRecord; text: string; at: (offset: number) => SourceSpan; forbidden: boolean }[] = []
+	const starts: StaticStart[] = []
 	const variants = new Map<string, Variant>()
+	let currentVariant: Variant | null = null
+	const recordStart = (start: StaticStart): void => {
+		starts.push(start)
+		if (currentVariant?.value === start.value) currentVariant.start ??= start
+	}
 	const actualWrites = new Set<ValueRecord>()
 	const renderWrites: { value: ValueRecord; name: string }[] = []
 	const finishTag = (context: Context, selfClosing: boolean): void => {
@@ -161,7 +167,7 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 							const url = prefix && !prefix.settled ? context.attribute : null
 							const tag = isTarget(context.tag, context.attribute) ? context.capture : null
 							if (url !== null || tag) { context.open = { kind: 'value-open', at: index, url, tag, dynamic: false }; records.push(context.open)
-								if (prefix && !prefix.settled && (prefix.forbidden || ampersand >= 0)) starts.push({ value: context.open, text: value.slice(start), at: offset => at(start + offset), forbidden: prefix.forbidden })
+								if (prefix && !prefix.settled && (prefix.forbidden || ampersand >= 0)) recordStart({ value: context.open, text: value.slice(start), at: offset => at(start + offset), forbidden: prefix.forbidden })
 							}
 						}
 						break
@@ -176,7 +182,7 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 					const close = value.indexOf(context.state === 'double' ? '"' : "'", index)
 					// In a URL list a reference may stand for a separator, wherever it is: none in the static text of a value that is written into.
 					const rest = value.slice(index, close < 0 ? value.length : close), start = index, list = context.open
-					if (list?.url && URL_LISTS.has(list.url) && rest.includes('&')) starts.push({ value: list, text: rest, at: offset => at(start + offset), forbidden: false })
+					if (list?.url && URL_LISTS.has(list.url) && rest.includes('&')) recordStart({ value: list, text: rest, at: offset => at(start + offset), forbidden: false })
 					if (close < 0) { index = value.length; break }
 					if (context.open) records.push({ kind: 'value-close', at: close })
 					index = close + 1
@@ -259,16 +265,17 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 		const known = binding.variants.get(key)
 		if (known) return known.name
 		if (binding.active) refuse('G3011', at, binding.active, '11', describe(entry))
-		const variant: Variant = { name: `$$snippet${++sequence}`, children: [], writes: false }
+		const variant: Variant = { name: `$$snippet${++sequence}`, value: entry.open, startCallers: [], children: [], writes: false, start: null }
 		variants.set(variant.name, variant)
 		binding.variants.set(key, variant); binding.list.push(variant); binding.active = entry
+		const parent = currentVariant
+		currentVariant = variant
 		try { variant.children = path(binding.node.children, entry, openScope(binding.node.children, binding.scope), 'G3011', binding.node.span).children }
 		catch (error) {
 			if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code !== 'G3018') throw error
 			const { line, column } = locate(at.source, at.start)
 			throw new GalleyDiagnosticError({ ...error.diagnostic, help: `${error.diagnostic.help} Rendered by ${at.source.text.slice(at.start, at.end)} at ${at.source.id}:${line}:${column}.` })
-		}
-		binding.active = null
+		} finally { binding.active = null; currentVariant = parent }
 		return variant.name
 	}
 	const visit = (nodes: readonly TemplateNode[], context: Context, scope: Scope, closes = false): readonly TemplateNode[] => {
@@ -309,7 +316,10 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 					if (ANIMATION_ELEMENTS.has(context.tag)) specialization = specialize(resolve(scope, node.name), context, node.span)
 					const written = slot(context, node.span, false, true)
 					specialization ??= specialize(resolve(scope, node.name), context, node.span)
-					if (context.open) renderWrites.push({ value: context.open, name: specialization })
+					if (context.open) {
+						renderWrites.push({ value: context.open, name: specialization })
+						if (currentVariant?.value === context.open) variants.get(specialization)!.startCallers.push(currentVariant)
+					}
 					result.push({ ...node, slot: written, specialization }); break
 				}
 			}
@@ -321,7 +331,7 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 	if (context.state !== 'data') refuse('G3012', { ...ast.span, start: ast.span.end }, context, '12', describe(context))
 	// Static-only snippets feed literal suffixes, but do not turn a static URL into a dynamic one.
 	// Propagate actual writes backwards over snippet calls; the queue visits each edge once, including cycles.
-	const callers = new Map<string, Variant[]>(), pending: Variant[] = []
+	const callers = new Map<string, Variant[]>(), pending: Variant[] = [], pendingStarts: Variant[] = []
 	const inspect = (nodes: readonly TemplateNode[], variant: Variant): void => {
 		for (const node of nodes) {
 			if (node.kind === 'output' || node.kind === 'js') variant.writes = true
@@ -332,11 +342,23 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 			else if (node.kind === 'each') { inspect(node.children, variant); inspect(node.fallback ?? [], variant) }
 		}
 	}
-	for (const variant of variants.values()) { inspect(variant.children, variant); if (variant.writes) pending.push(variant) }
+	for (const variant of variants.values()) {
+		inspect(variant.children, variant)
+		if (variant.writes) pending.push(variant)
+		if (variant.start) pendingStarts.push(variant)
+	}
 	for (let index = 0; index < pending.length; index++) for (const caller of callers.get(pending[index]!.name) ?? []) {
 		if (!caller.writes) { caller.writes = true; pending.push(caller) }
 	}
-	for (const render of renderWrites) if (variants.get(render.name)!.writes) actualWrites.add(render.value)
+	// A cached variant owes its entry value's static-text check to every caller, including through cycles.
+	for (let index = 0; index < pendingStarts.length; index++) for (const caller of pendingStarts[index]!.startCallers) {
+		if (!caller.start) { caller.start = pendingStarts[index]!.start; pendingStarts.push(caller) }
+	}
+	for (const render of renderWrites) {
+		const variant = variants.get(render.name)!
+		if (variant.writes) actualWrites.add(render.value)
+		if (variant.start) starts.push({ ...variant.start, value: render.value })
+	}
 	for (const start of starts) if (actualWrites.has(start.value)) {
 		if (start.forbidden) fail('G3015', `HTML context URL; forbidden static prefix: ${excerpt(start.text)}`, start.at(0), 'Use a relative URL, or http:, https:, mailto: or tel:, before a dynamic value.')
 		fail('G3015', `HTML context URL; rule 14: ${excerpt(start.text)}`, start.at(start.text.indexOf('&')), URL_LISTS.has(start.value.url!) ? 'Move query text into an escaped value in a URL list.' : 'Write the character itself, not a reference, before a value in a URL.')

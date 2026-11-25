@@ -44,6 +44,12 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
     let identity = 0, sequence = 0;
     const starts = [];
     const variants = new Map();
+    let currentVariant = null;
+    const recordStart = (start) => {
+        starts.push(start);
+        if (currentVariant?.value === start.value)
+            currentVariant.start ??= start;
+    };
     const actualWrites = new Set();
     const renderWrites = [];
     const finishTag = (context, selfClosing) => {
@@ -188,7 +194,7 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                                 context.open = { kind: 'value-open', at: index, url, tag, dynamic: false };
                                 records.push(context.open);
                                 if (prefix && !prefix.settled && (prefix.forbidden || ampersand >= 0))
-                                    starts.push({ value: context.open, text: value.slice(start), at: offset => at(start + offset), forbidden: prefix.forbidden });
+                                    recordStart({ value: context.open, text: value.slice(start), at: offset => at(start + offset), forbidden: prefix.forbidden });
                             }
                         }
                         break;
@@ -206,7 +212,7 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                     // In a URL list a reference may stand for a separator, wherever it is: none in the static text of a value that is written into.
                     const rest = value.slice(index, close < 0 ? value.length : close), start = index, list = context.open;
                     if (list?.url && URL_LISTS.has(list.url) && rest.includes('&'))
-                        starts.push({ value: list, text: rest, at: offset => at(start + offset), forbidden: false });
+                        recordStart({ value: list, text: rest, at: offset => at(start + offset), forbidden: false });
                     if (close < 0) {
                         index = value.length;
                         break;
@@ -328,11 +334,13 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
             return known.name;
         if (binding.active)
             refuse('G3011', at, binding.active, '11', describe(entry));
-        const variant = { name: `$$snippet${++sequence}`, children: [], writes: false };
+        const variant = { name: `$$snippet${++sequence}`, value: entry.open, startCallers: [], children: [], writes: false, start: null };
         variants.set(variant.name, variant);
         binding.variants.set(key, variant);
         binding.list.push(variant);
         binding.active = entry;
+        const parent = currentVariant;
+        currentVariant = variant;
         try {
             variant.children = path(binding.node.children, entry, openScope(binding.node.children, binding.scope), 'G3011', binding.node.span).children;
         }
@@ -342,7 +350,10 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
             const { line, column } = locate(at.source, at.start);
             throw new GalleyDiagnosticError({ ...error.diagnostic, help: `${error.diagnostic.help} Rendered by ${at.source.text.slice(at.start, at.end)} at ${at.source.id}:${line}:${column}.` });
         }
-        binding.active = null;
+        finally {
+            binding.active = null;
+            currentVariant = parent;
+        }
         return variant.name;
     };
     const visit = (nodes, context, scope, closes = false) => {
@@ -400,8 +411,11 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                         specialization = specialize(resolve(scope, node.name), context, node.span);
                     const written = slot(context, node.span, false, true);
                     specialization ??= specialize(resolve(scope, node.name), context, node.span);
-                    if (context.open)
+                    if (context.open) {
                         renderWrites.push({ value: context.open, name: specialization });
+                        if (currentVariant?.value === context.open)
+                            variants.get(specialization).startCallers.push(currentVariant);
+                    }
                     result.push({ ...node, slot: written, specialization });
                     break;
                 }
@@ -415,7 +429,7 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
         refuse('G3012', { ...ast.span, start: ast.span.end }, context, '12', describe(context));
     // Static-only snippets feed literal suffixes, but do not turn a static URL into a dynamic one.
     // Propagate actual writes backwards over snippet calls; the queue visits each edge once, including cycles.
-    const callers = new Map(), pending = [];
+    const callers = new Map(), pending = [], pendingStarts = [];
     const inspect = (nodes, variant) => {
         for (const node of nodes) {
             if (node.kind === 'output' || node.kind === 'js')
@@ -439,6 +453,8 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
         inspect(variant.children, variant);
         if (variant.writes)
             pending.push(variant);
+        if (variant.start)
+            pendingStarts.push(variant);
     }
     for (let index = 0; index < pending.length; index++)
         for (const caller of callers.get(pending[index].name) ?? []) {
@@ -447,9 +463,21 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                 pending.push(caller);
             }
         }
-    for (const render of renderWrites)
-        if (variants.get(render.name).writes)
+    // A cached variant owes its entry value's static-text check to every caller, including through cycles.
+    for (let index = 0; index < pendingStarts.length; index++)
+        for (const caller of pendingStarts[index].startCallers) {
+            if (!caller.start) {
+                caller.start = pendingStarts[index].start;
+                pendingStarts.push(caller);
+            }
+        }
+    for (const render of renderWrites) {
+        const variant = variants.get(render.name);
+        if (variant.writes)
             actualWrites.add(render.value);
+        if (variant.start)
+            starts.push({ ...variant.start, value: render.value });
+    }
     for (const start of starts)
         if (actualWrites.has(start.value)) {
             if (start.forbidden)
