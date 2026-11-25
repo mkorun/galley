@@ -19,6 +19,9 @@ export { parse } from './parser.js'
 
 const HTML: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;' }
 
+/** JavaScript callers may pass non-booleans; lint and generation share this decision. */
+const normalizeOptions = (options: CompileOptions): CompileOptions => ({ ...options, allowCode: options.allowCode === true })
+
 const expandPartials = async (ast: TemplateAst, options: CompileOptions): Promise<TemplateAst> => {
 	if (!contains(ast.children, 'partial')) return ast
 	// chain: the partials open around these nodes, so that one that includes itself is named, not followed for ever
@@ -55,6 +58,7 @@ const stripStatic = (nodes: readonly TemplateNode[], root = false): readonly Tem
 
 /** Lint uses the compiler's reader; unresolved partials preserve their entry context. */
 export async function lint(template: string, options: CompileOptions = {}): Promise<Diagnostic[]> {
+	options = normalizeOptions(options)
 	const filters = filterRegistry(options)
 	const diagnostics: Diagnostic[] = []
 	try {
@@ -76,6 +80,7 @@ export async function lint(template: string, options: CompileOptions = {}): Prom
 export default async function galley<
 	Data extends object = Record<string, unknown>,
 >(template = '', options: CompileOptions = {}): Promise<CompiledTemplate<Data>> {
+	options = normalizeOptions(options)
 	const filters = filterRegistry(options)
 	const source: SourceFile = { id: options.sourceId ?? '<template>', text: template }
 	const initial = parse(source)

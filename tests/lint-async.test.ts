@@ -2,6 +2,23 @@ import { expect, test } from 'bun:test'
 import galley, { lint } from '../index.js'
 import { render } from './helpers.js'
 
+test('only boolean true allows JavaScript in compilation and lint', async () => {
+	for (const allowCode of [undefined, null, false, 0, '', 1, 'false', 'yes', {}, [], true]) {
+		const options = { allowCode: allowCode as boolean }
+		for (const source of ['{@js}return "ran"{@js}', '{@js}return await Promise.resolve("ran"){@js}']) {
+			if (allowCode === true) {
+				expect(await lint(source, options)).toEqual([])
+				const template = await galley(source, options)
+				expect(template.async).toBe(true)
+				expect(await template.render({})).toBe('ran')
+			} else {
+				expect((await lint(source, options)).map(d => d.code)).toEqual(['G3004'])
+				await expect(galley(source, options)).rejects.toMatchObject({ diagnostic: { code: 'G3004' } })
+			}
+		}
+	}
+})
+
 test('G-35: lint always returns a Promise; partials preserve context without a resolver', async () => {
 	for (const options of [{}, { includes: { import: async () => '' } }]) {
 		const result: Promise<import('../compiler/types.js').Diagnostic[]> = lint('ok', options)

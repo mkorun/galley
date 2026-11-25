@@ -12,6 +12,8 @@ export { GalleyDiagnosticError, formatDiagnostic, locate } from './diagnostics.j
 export { lex } from './lexer.js';
 export { parse } from './parser.js';
 const HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;' };
+/** JavaScript callers may pass non-booleans; lint and generation share this decision. */
+const normalizeOptions = (options) => ({ ...options, allowCode: options.allowCode === true });
 const expandPartials = async (ast, options) => {
     if (!contains(ast.children, 'partial'))
         return ast;
@@ -59,6 +61,7 @@ const stripStatic = (nodes, root = false) => nodes.map((node, index) => {
 });
 /** Lint uses the compiler's reader; unresolved partials preserve their entry context. */
 export async function lint(template, options = {}) {
+    options = normalizeOptions(options);
     const filters = filterRegistry(options);
     const diagnostics = [];
     try {
@@ -79,6 +82,7 @@ export async function lint(template, options = {}) {
     return diagnostics;
 }
 export default async function galley(template = '', options = {}) {
+    options = normalizeOptions(options);
     const filters = filterRegistry(options);
     const source = { id: options.sourceId ?? '<template>', text: template };
     const initial = parse(source);

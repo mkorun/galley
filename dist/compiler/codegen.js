@@ -257,6 +257,6 @@ export const generate = (ast, options = {}) => {
     // addresses the data parameter itself, not a property literally named "$".
     emitNodes(ast.children, new Set(['$']), '$$');
     body += 'return $$;';
-    return { body, async: options.allowCode === true, places };
+    return { body, async: options.allowCode ?? false, places };
 };
 //# sourceMappingURL=codegen.js.map
