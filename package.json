@@ -1,6 +1,6 @@
 {
 	"name": "@mkorun/galley",
-	"version": "0.5.0-rc.1",
+	"version": "0.5.0",
 	"description": "galley — Svelte-inspired template engine, compiles once into native JS render functions",
 	"type": "module",
 	"author": "Michael Kortstiege <michael@mko.run>",
