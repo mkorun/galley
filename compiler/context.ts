@@ -71,7 +71,7 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 		if (currentVariant?.value === start.value) currentVariant.start ??= start
 	}
 	const actualWrites = new Set<ValueRecord>()
-	const renderWrites: { value: ValueRecord; name: string }[] = []
+	const renderWrites: { value: ValueRecord; name: string; slot: HtmlSlot }[] = []
 	const finishTag = (context: Context, selfClosing: boolean): void => {
 		const at = context.tagAt!
 		const tag = context.tag
@@ -317,7 +317,7 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 					const written = slot(context, node.span, false, true)
 					specialization ??= specialize(resolve(scope, node.name), context, node.span)
 					if (context.open) {
-						renderWrites.push({ value: context.open, name: specialization })
+						renderWrites.push({ value: context.open, name: specialization, slot: written })
 						if (currentVariant?.value === context.open) variants.get(specialization)!.startCallers.push(currentVariant)
 					}
 					result.push({ ...node, slot: written, specialization }); break
@@ -357,6 +357,8 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 	for (const render of renderWrites) {
 		const variant = variants.get(render.name)!
 		if (variant.writes) actualWrites.add(render.value)
+		// A snippet that can write no dynamic value is static text to stripEmptyMeta: its call marks no tag.
+		else render.slot.metadata = false
 		if (variant.start) starts.push({ ...variant.start, value: render.value })
 	}
 	for (const start of starts) if (actualWrites.has(start.value)) {

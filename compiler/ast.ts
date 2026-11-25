@@ -66,8 +66,11 @@ export interface HtmlSlot {
 	readonly place: string
 	/** The value of a quoted URL attribute that its static start does not settle: each write is checked. */
 	readonly url: boolean
-	/** The value of the first `content` of `<meta>` or `href` of `<link>`: a write decides whether stripEmptyMeta removes the tag. */
-	readonly metadata: boolean
+	/**
+	 * The value of the first `content` of `<meta>` or `href` of `<link>`: a write decides whether stripEmptyMeta removes the tag.
+	 * The reader clears it for a render whose snippet can write no dynamic value.
+	 */
+	metadata: boolean
 }
 /**
  * What the context reader found in a text node; `at` is an offset into its value. There are records only where a render

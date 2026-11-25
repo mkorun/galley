@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   different number (`a[9007199254740993]` read key `9007199254740992`, 310 nines read `Infinity`) and is now G1107;
   quote such a key, as in `a['9007199254740993']`, or pass the number in data. In `{#each}` collections both are
   reported as such, not as G2216.
+- `stripEmptyMeta` keeps a `<meta content>` or `<link href>` whose value is written only by snippets that can write
+  no dynamic value. `{#snippet s()}{/snippet}<meta name="d" content="{@render s()}">` rendered nothing and now
+  renders the tag with `content=""`. A snippet that can write a dynamic value still lets an empty tag go; for a tag
+  that should go when empty, write its value with an output, such as `content="{ value }"`.
 
 ## [0.5.0] — 2026-11-25
 

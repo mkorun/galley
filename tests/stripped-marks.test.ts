@@ -27,6 +27,40 @@ describe('a value with the marks of stripEmptyMeta', () => {
 	})
 })
 
+describe('a snippet rendered into the target of stripEmptyMeta', () => {
+	const tags = [['<meta name="d" content="', '">'], ['<link rel="x" href="', '">']] as const
+
+	test('marks the tag only when its variant can write a dynamic value', async () => {
+		const kept = [
+			['{#snippet s()}{/snippet}', '{@render s()}', {}, ''],
+			['{#snippet s()}x{/snippet}', '{@render s()}', {}, 'x'],
+			['{#snippet s()}{#if p}x{/if}{/snippet}', '{@render s()}', { p: false }, ''],
+			['{#snippet s(v)}{#each v as x}y{/each}{/snippet}', '{@render s(v)}', { v: [] }, ''],
+			['{#snippet inner()}{/snippet}{#snippet s()}{@render inner()}{/snippet}', '{@render s()}', {}, ''],
+			['{#snippet inner()}{#if p}x{/if}{/snippet}{#snippet s()}{@render inner()}{/snippet}', '{@render s()}{@render inner()}', { p: false }, ''],
+		] as const
+		const removed = [
+			['{#snippet s(v)}{ v }{/snippet}', '{@render s(v)}', { v: '' }],
+			['{#snippet s(v)}{@raw v}{/snippet}', '{@render s(v)}', { v: '' }],
+			['{#snippet s(v)}{#if v}{ v }{/if}{/snippet}', '{@render s(v)}', { v: '' }],
+			['{#snippet s()}{/snippet}', '{@render s()}{ v }', { v: '' }],
+			['{#snippet inner(v)}{ v }{/snippet}{#snippet s(v)}{@render inner(v)}{/snippet}', '{@render s(v)}', { v: '' }],
+			['{#snippet inner(v)}{ v }{/snippet}{#snippet s(v)}{#if v}{@render inner(v)}{/if}{/snippet}', '{@render s(v)}', { v: '' }],
+		] as const
+		for (const [open, close] of tags) {
+			for (const [declarations, value, data, written] of kept) expect(await render(`${declarations}${open}${value}${close}`, data)).toBe(`${open}${written}${close}`)
+			for (const [declarations, value, data] of removed) expect(await render(`${declarations}${open}${value}${close}`, data)).toBe('')
+			// A snippet that does write keeps the tag when the value is not empty.
+			expect(await render(`{#snippet s(v)}{ v }{/snippet}${open}{@render s(v)}${close}`, { v: 'x' })).toBe(`${open}x${close}`)
+		}
+	})
+
+	test('the same snippet keeps a separate decision in each tag', async () => {
+		const source = '{#snippet e()}{/snippet}{#snippet w(v)}{ v }{/snippet}<meta content="{@render e()}">\n<meta content="{@render w(v)}">\n<link href="{@render e()}">'
+		expect(await render(source, { v: '' })).toBe('<meta content="">\n<link href="">')
+	})
+})
+
 describe('what a template may not do to the generated code', () => {
 	test('a scripted snippet or a constant may not take a global the generated code reads', async () => {
 		for (const name of ['String', 'Object', 'Array', 'TypeError', 'undefined']) {
