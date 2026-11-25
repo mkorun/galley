@@ -167,7 +167,7 @@ def run():
                 file.write_bytes(original.encode('utf-8'))
             if failures:
                 if reason:
-                    raise SystemExit(f'Obsolete equivalence, now killed: {mutant["id"]}')
+                    raise SystemExit(f'Obsolete equivalence, now killed: {mutant["id"]}\nFailing test: {failures[0]}')
                 killed += 1
                 status = 'killed: ' + failures[0]
             elif reason:

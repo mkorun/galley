@@ -24,7 +24,7 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 	}
 	const change = (node: ts.Node, after: string, kind: string) => add(node.getStart(ast), node.end, after, kind)
 	const flip = (node: ts.Node) => change(node, `!(${node.getText(ast)})`, 'predicate')
-	// URL checkpoint generation: liveness, writes, literal feeds, attribute ends and snippet checkpoints.
+	// Compiler walks, grammar additions and URL checkpoint generation.
 	const regions = file.endsWith('ast.ts') ? [
 		[source.indexOf('export const LOOP_METADATA'), source.indexOf('export interface PathSegment')],
 	] : file === 'util.ts' ? [
@@ -32,26 +32,24 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 	] : file.endsWith('stringify.ts') ? [
 		[source.indexOf('export const filterWithWarnings'), source.length],
 	] : file.endsWith('analysis.ts') ? [
-		[source.indexOf('const collectExpressionMetadata'), source.indexOf('/** Whether')],
-		[source.indexOf('export const scriptedSnippets'), source.indexOf('export const analyze')],
-		[source.indexOf("else if (node.kind === 'render')"), source.indexOf("else if (node.kind === 'if')", source.indexOf('export const analyze'))],
-		[source.indexOf('if (metadata) collectExpressionMetadata(node.collection'), source.indexOf('const ownMetadata')],
+		[source.indexOf('const collectExpressionMetadata'), source.length],
 	] : file.endsWith('codegen.ts') ? [
-		[source.indexOf('const places:'), source.indexOf('const strip =')],
-		[source.indexOf('let body ='), source.indexOf('let sequence =')],
-		[source.indexOf('const live ='), source.indexOf("// '$' is seeded")],
+		[source.indexOf('const places:'), source.length],
 	] : file.endsWith('lexer.ts') ? [
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
-	] : file.endsWith('index.ts') ? [[source.indexOf('const stripStatic'), source.length]] : file.endsWith('parser.ts') ? [
+	] : file.endsWith('index.ts') ? [[source.indexOf('const normalizeOptions'), source.length]] : file.endsWith('parser.ts') ? [
 		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')"), source.indexOf("return fail('G2108'")],
 		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
 		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
 		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
-		[source.indexOf('export const braceDiagnostic'), source.indexOf('/** Lexical removals')],
+		[source.indexOf('const literalBraces'), source.indexOf('/** Lexical removals')],
 		[source.indexOf("if (error.diagnostic.code === 'G1106')"), source.indexOf('// ADR-015:')],
+		[source.indexOf('const braces = new Map<number'), source.indexOf('// ADR-014')],
 		// B2: which continuation ends a branch, and the each fallback's parse and source span.
+		[source.indexOf('const parseChildren ='), source.indexOf('const children: TemplateNode[]')],
 		[source.indexOf("if ((token.kind === 'block-close'"), source.indexOf('\n\t\t\tcursor++')],
+		[source.indexOf("case 'continuation':"), source.indexOf('\n\t\treturn { children: joinTexts(children), stop: null }')],
 		[source.indexOf("const result = parseChildren('each', 'each')"), source.indexOf('const parseSnippet')],
 		// Collection paths use the same first-name check as complete expressions.
 		[source.indexOf('for (const name of [item, index])'), source.indexOf('if (index === item)')],
@@ -64,6 +62,7 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 			change(node.arguments[1]!, '0', 'expression source offset')
 			if (node.arguments[2]) change(node.arguments[2], 'undefined', 'expression source length')
 		}
+		if (file === 'compiler/parser.ts' && ts.isCallExpression(node) && node.expression.getText(ast) === 'parseChildren' && node.arguments[1]) change(node.arguments[1], 'null', 'drop branch continuation')
 		if (file === 'compiler/parser.ts' && ts.isBinaryExpression(node) && node.getStart(ast) >= source.indexOf('const expressionSpan') && node.end < source.indexOf('/** Lexical removals')) change(node, node.left.getText(ast), 'span arithmetic')
 
 		if (!regions.some(([a,b]) => node.getStart(ast) >= a! && node.end <= b!)) { ts.forEachChild(node, visit); return }

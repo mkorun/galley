@@ -44,6 +44,7 @@ for kind in ['cache bound below', 'cache bound above', 'registry prototype', 're
     assert any(m['kind'] == kind for m in original), kind
 assert sum(m['kind'] == 'pipe name span' for m in original) == 2
 assert sum(m['kind'] == 'pipe grouping help' for m in original) == 2
+assert {m['before'] for m in original if m['kind'] == 'drop branch continuation'} == {"'if'", "'each'"}
 assert any(m['file'] == 'compiler/codegen.ts' and m['kind'] == 'drop generated one-based offset' for m in original)
 for name in ['length', 'isFirst', 'isLast', 'position']:
     assert any(m['file'] == 'compiler/ast.ts' and m['kind'] == f"set '{name}'" for m in original), name
@@ -54,4 +55,18 @@ for statement in ['newline = nextNewline;', "nextNewline = text.indexOf('\\n', n
     assert any(m['file'] == 'compiler/lexer.ts' and statement in m['before'] for m in original), statement
 for statement in ['visit(node.children)', 'visit(children)']:
     assert any(m['file'] == 'compiler/analysis.ts' and m['kind'] == 'delete statement' and m['before'] == statement for m in original), statement
+for file, context, statement in [
+    ('compiler/codegen.ts', 'hasMetadata', 'hasMetadata(node.fallback'),
+    ('compiler/index.ts', 'expandPartials', 'node.fallback'),
+    ('compiler/analysis.ts', 'contains', 'contains(node.fallback'),
+    ('compiler/analysis.ts', 'annotate', 'node.fallback'),
+    ('compiler/index.ts', 'normalizeOptions', 'options.allowCode === true'),
+    ('compiler/codegen.ts', 'generate', 'async: options.allowCode'),
+    ('compiler/context.ts', 'recordStart', 'currentVariant.start'),
+    ('compiler/context.ts', 'visit', 'startCallers.push(currentVariant)'),
+    ('compiler/context.ts', 'readContexts', 'caller.start = pendingStarts[index]!.start'),
+    ('compiler/parser.ts', 'parseTokens', 'literalBraces.set(source, braces)'),
+    ('compiler/parser.ts', 'parseChildren', "continuations === 'each'"),
+]:
+    assert any(m['file'] == file and context in json.loads(m['id'])[1] and statement in m['before'] for m in original), (file, context, statement)
 print(f'{len(original)} stable keys; push, assignment, return, snippet state and lint mutations present')

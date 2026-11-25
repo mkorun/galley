@@ -9,6 +9,21 @@ test('the recorded nested length collection reads loop metadata', async () => {
 	expect(await render('{#each xs as x}{#each lists[length] as y}{ y }{/each}{/each}', { xs: [1], lists: { 1: ['OK'] } })).toBe('OK')
 })
 
+test('conditional branches retain loop annotations, including loops in an each fallback', async () => {
+	const source = '{#if show}{#each missing as x}{ x }{:else}{#each xs as y}{ position }/{ length }/{ isLast };{/each}{/each}{/if}'
+	const data = { show: true, xs: ['a', 'b'] }
+	expect(await render(source, data)).toBe('1/2/false;2/2/true;')
+	expect(await render(source, { ...data, show: false })).toBe('')
+})
+
+test('conditions outside loops read metadata names from data', async () => {
+	for (const name of ['length', 'position', 'isFirst', 'isLast']) {
+		const source = `{#if ${name}}yes{:else}no{/if}`
+		expect(await render(source, { [name]: true })).toBe('yes')
+		expect(await render(source, { [name]: false })).toBe('no')
+	}
+})
+
 for (const [name, expected] of cases) {
 	for (const path of [`lists[${name}]`, `nested.lists[${name}]`]) {
 		test(`nested collection ${path} discovers surrounding metadata`, async () => {

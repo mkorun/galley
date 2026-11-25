@@ -323,7 +323,8 @@ class CampaignTests(unittest.TestCase):
         self.campaign_fails('Stale equivalence')
         self.assertEqual(self.calls, [])
         self.equivalents.write_text('{"example": "Obsolete review"}', encoding='utf-8')
-        self.campaign_fails('Obsolete equivalence')
+        error = self.campaign_fails('Obsolete equivalence')
+        self.assertIn('Failing test: focused assertion', str(error))
 
     def test_equivalents_full_suite_kill_fails(self):
         self.focused = []

@@ -61,6 +61,15 @@ test('each-else: partials, strip, lint and scripted snippets reach the fallback'
 	expect(await render('{#each items as x}{ x }{:else}before \t<meta content="{ a }">\nafter{/each}', { a: '' })).toBe('beforeafter')
 })
 
+test('metadata indentation follows each bodies, fallbacks, branches and snippet variants', async () => {
+	for (const source of [
+		'before{#each xs as x} \t<meta content="{ x }">\n{/each}after',
+		'before{#each missing as x}{ x }{:else} \t<meta content="{ v }">\n{/each}after',
+		'before{#if p} \t<meta content="{ v }">\n{/if}after',
+		'before{#snippet s()} \t<meta content="{ v }">\n{/snippet}{@render s()}after',
+	]) expect(await render(source, { xs: [''], v: '', p: true })).toBe('beforeafter')
+})
+
 test('each-else, rule 11: the fallback is a path of its own and must leave the context it entered', async () => {
 	for (const source of [
 		'{#each xs as x}a{:else}<a {/each}',

@@ -43,7 +43,7 @@ test('cached callers retain their own forbidden prefixes and script/style diagno
 })
 
 test('static-text obligations propagate through cached recursive variants', async () => {
-	const snippets = '{#snippet a()}{#if p}{@render b()}{/if}?a=1&amp;b=2 1x{/snippet}{#snippet b()}{@render a()}{/snippet}'
+	const snippets = '{#snippet a()}{#if p}{@render b()}{/if}?a=1&amp;b=2 1x{/snippet}{#snippet b()}{@render c()}{/snippet}{#snippet c()}{@render a()}{/snippet}'
 	for (const attribute of ['srcset', 'imagesrcset']) {
 		const source = snippets + `<img ${attribute}="/s.png{@render a()}"><img ${attribute}="{ v }{@render b()}">`
 		expect((await lint(source)).map(d => d.code)).toEqual(['G3015'])
