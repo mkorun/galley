@@ -22,8 +22,9 @@ Animation `to`, `from`, `by` and `values` on `set`, `animate`, `animateMotion` a
 static (G3016). Any template tag in these values is refused, including attributes supplied by snippets or partials,
 regardless of `attributeName`. Element and attribute names are ASCII case-insensitive, in every namespace.
 
-Attributes beginning with `on` and `srcdoc` must also contain no template tags (G3017), including through snippets
-or partials, in every namespace and ASCII case. Whole static attributes inside blocks remain allowed.
+Template tags inside `on*` and `srcdoc` values are refused with G3017, in every namespace and ASCII case.
+This includes a snippet or partial writing into such a value. Snippets cannot supply whole attributes (G3009).
+Whole static attributes inside blocks remain allowed.
 
 Each nonempty dynamic write in quoted `href`, `src`, `action`, `formaction`, `poster`, `cite` or `xlink:href` is checked
 with all preceding serialized characters, including executed literals, branches, loops and snippets. Relative URLs
@@ -44,8 +45,12 @@ with G5001 and quotes the prefix including `&`. Settled single-URL prefixes igno
 
 Empty writes create no checkpoint. A snippet's result creates a caller checkpoint only when it checked a nonempty
 dynamic write, without feeding its bytes twice. At the attribute end, the finished prefix is checked once more if
-any nonempty dynamic write was checked in that value. All executed literals and snippet output participate;
-without such a write, no end check runs. This is prefix admission, without completed-URL or origin validation.
+any nonempty dynamic write was checked in that value. All executed literals and snippet output participate,
+including character references: `{ u }:alert(1)` and `{ u }&#58;alert(1)` stop with G5001 for `u = "javascript"`,
+the second at the attribute-end check. Without such a write, no end check runs.
+
+An unsettled bare word followed by `&amp;b=1` or `:8080/` also stops; a relative prefix or an allowed scheme settles
+it. This is prefix admission, without completed-URL or origin validation.
 
 The reader refuses malformed separators, partial delimiters and end-tag attributes. Every branch, iteration, partial
 and snippet must preserve its entry context, including foreign/template counts and the identities of open tags and
