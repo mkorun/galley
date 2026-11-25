@@ -33,7 +33,7 @@ const pathCode = (path: PathExpression, scope: ReadonlySet<string>): string => {
 }
 
 
-export const generate = (ast: TemplateAst, options: { readonly strictUndefined?: boolean; readonly allowCode?: boolean; readonly strip?: boolean; readonly stripEmptyMeta?: boolean; readonly debug?: boolean } = {}): GeneratedProgram => {
+export const generate = (ast: TemplateAst, options: { readonly strictUndefined?: boolean; readonly strip?: boolean; readonly stripEmptyMeta?: boolean; readonly debug?: boolean }, allowCode: boolean): GeneratedProgram => {
 	const places: SourceSpan[] = []
 	const place = (at: SourceSpan): number => { places.push(at); return places.length - 1 }
 	const checked = (code: string, at: SourceSpan): string => options.strictUndefined ? `$$defined(${code},${place(at)})` : code
@@ -225,5 +225,5 @@ export const generate = (ast: TemplateAst, options: { readonly strictUndefined?:
 	// addresses the data parameter itself, not a property literally named "$".
 	emitNodes(ast.children, new Set(['$']), '$$')
 	body += 'return $$;'
-	return { body, async: options.allowCode === true, places }
+	return { body, async: allowCode, places }
 }

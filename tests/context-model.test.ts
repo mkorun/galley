@@ -170,9 +170,9 @@ test('compiler boundary diagnostics and independent existing helper branches', a
 	expect(await render('x<!---x-->y')).toBe('x<!---x-->y')
 	expect((await lint('{@const x = a | upper( )}'))[0]?.code).toBe('G2108')
 	await expect(galley('{#if yes}{@partial p.sort}{/if}', { includes: { import: async () => 'x' } })).resolves.toBeDefined()
-	expect(() => generate(parse({ id: 'partial', text: '{@partial p.sort}' }))).toThrow('G4002')
+	expect(() => generate(parse({ id: 'partial', text: '{@partial p.sort}' }), {}, false)).toThrow('G4002')
 	const ast = parse({ id: 'direct', text: 'text' })
-	expect(generate(ast).body).toContain('text')
+	expect(generate(ast, {}, false).body).toContain('text')
 })
 
 

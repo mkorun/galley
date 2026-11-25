@@ -38,7 +38,7 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 	] : file.endsWith('lexer.ts') ? [
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
 		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
-	] : file.endsWith('index.ts') ? [[source.indexOf('const normalizeOptions'), source.length]] : file.endsWith('parser.ts') ? [
+	] : file.endsWith('index.ts') ? [[source.indexOf('const codeAllowed'), source.length]] : file.endsWith('parser.ts') ? [
 		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')"), source.indexOf("return fail('G2108'")],
 		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
 		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
@@ -94,6 +94,10 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 			}
 		}
 		if (file === 'compiler/index.ts' && ts.isCallExpression(node) && ['lintAst', 'readContexts'].includes(node.expression.getText(ast))) change(node, `${node.expression.getText(ast)}(${node.arguments.slice(0, -1).map(arg => arg.getText(ast)).join(', ')})`, 'repeat snippet marking')
+		if (file === 'compiler/index.ts' && ts.isCallExpression(node) && ['lintAst', 'generate'].includes(node.expression.getText(ast))) {
+			for (const argument of node.arguments) if (argument.getText(ast) === 'allowCode') change(argument, 'options.allowCode', 'repeat code option read')
+		}
+		if (file === 'compiler/codegen.ts' && ts.isPropertyAssignment(node) && node.name.getText(ast) === 'async' && node.initializer.getText(ast) === 'allowCode') change(node.initializer, '!allowCode', 'async flag')
 		// Registry construction and source spans are observable through the public compiler too.
 		if (file === 'compiler/filters.ts' && ts.isCallExpression(node)) {
 			if (node.expression.getText(ast) === 'Object.create') change(node, '{}', 'registry prototype')

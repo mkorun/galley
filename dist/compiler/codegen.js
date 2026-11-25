@@ -29,7 +29,7 @@ const pathCode = (path, scope) => {
     }
     return code;
 };
-export const generate = (ast, options = {}) => {
+export const generate = (ast, options, allowCode) => {
     const places = [];
     const place = (at) => { places.push(at); return places.length - 1; };
     const checked = (code, at) => options.strictUndefined ? `$$defined(${code},${place(at)})` : code;
@@ -257,6 +257,6 @@ export const generate = (ast, options = {}) => {
     // addresses the data parameter itself, not a property literally named "$".
     emitNodes(ast.children, new Set(['$']), '$$');
     body += 'return $$;';
-    return { body, async: options.allowCode === true, places };
+    return { body, async: allowCode, places };
 };
 //# sourceMappingURL=codegen.js.map

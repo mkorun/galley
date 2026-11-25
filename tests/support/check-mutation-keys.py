@@ -45,6 +45,8 @@ for kind in ['cache bound below', 'cache bound above', 'registry prototype', 're
 assert sum(m['kind'] == 'pipe name span' for m in original) == 2
 assert sum(m['kind'] == 'pipe grouping help' for m in original) == 2
 assert {m['before'] for m in original if m['kind'] == 'drop branch continuation'} == {"'if'", "'each'"}
+assert sum(m['kind'] == 'repeat code option read' for m in original) == 3
+assert sum(m['kind'] == 'async flag' for m in original) == 1
 assert any(m['file'] == 'compiler/codegen.ts' and m['kind'] == 'drop generated one-based offset' for m in original)
 for name in ['length', 'isFirst', 'isLast', 'position']:
     assert any(m['file'] == 'compiler/ast.ts' and m['kind'] == f"set '{name}'" for m in original), name
@@ -60,8 +62,8 @@ for file, context, statement in [
     ('compiler/index.ts', 'expandPartials', 'node.fallback'),
     ('compiler/analysis.ts', 'contains', 'contains(node.fallback'),
     ('compiler/analysis.ts', 'annotate', 'node.fallback'),
-    ('compiler/index.ts', 'normalizeOptions', 'options.allowCode === true'),
-    ('compiler/codegen.ts', 'generate', 'async: options.allowCode'),
+    ('compiler/index.ts', 'codeAllowed', 'options.allowCode === true'),
+    ('compiler/codegen.ts', 'generate', 'async: allowCode'),
     ('compiler/context.ts', 'recordStart', 'currentVariant.start'),
     ('compiler/context.ts', 'visit', 'startCallers.push(currentVariant)'),
     ('compiler/context.ts', 'readContexts', 'caller.start = pendingStarts[index]!.start'),

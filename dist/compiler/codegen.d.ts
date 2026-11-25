@@ -5,11 +5,10 @@ export interface GeneratedProgram {
     readonly async: boolean;
     readonly places: readonly SourceSpan[];
 }
-export declare const generate: (ast: TemplateAst, options?: {
+export declare const generate: (ast: TemplateAst, options: {
     readonly strictUndefined?: boolean;
-    readonly allowCode?: boolean;
     readonly strip?: boolean;
     readonly stripEmptyMeta?: boolean;
     readonly debug?: boolean;
-}) => GeneratedProgram;
+}, allowCode: boolean) => GeneratedProgram;
 //# sourceMappingURL=codegen.d.ts.map

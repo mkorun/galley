@@ -1,13 +1,13 @@
 import { LOOP_METADATA } from './ast.js'
 import type { LoopMetadata, Expression, TemplateAst, TemplateNode } from './ast.js'
 import { locate } from './diagnostics.js'
-import type { Diagnostic, FilterMap, LintOptions, SourceSpan } from './types.js'
+import type { Diagnostic, FilterMap, SourceSpan } from './types.js'
 
 /** Names used by generated runtime calls must not be shadowed by template declarations. */
 const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined'])
 const invalidNames = new Map<string, boolean>()
 
-export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterMap, scripted: ReadonlySet<SourceSpan>): readonly Diagnostic[] => {
+export const lintAst = (ast: TemplateAst, allowCode: boolean, filters: FilterMap, scripted: ReadonlySet<SourceSpan>): readonly Diagnostic[] => {
 	const diagnostics: Diagnostic[] = []
 	type Snippet = TemplateNode & { kind: 'snippet' }
 	interface Scope { readonly parent: Scope | null; readonly snippets: Map<string, Snippet>; names: Map<string, readonly SourceSpan[]> | undefined; readonly loop: SourceSpan | undefined; readonly partials: readonly SourceSpan[] }
@@ -99,7 +99,7 @@ export const lintAst = (ast: TemplateAst, options: LintOptions, filters: FilterM
 					for (const argument of node.arguments) expression(argument)
 					break
 				}
-				case 'js': if (!options.allowCode) report({ code: 'G3004', severity: 'error', message: '{@js} requires allowCode: true', span: node.span }); break
+				case 'js': if (!allowCode) report({ code: 'G3004', severity: 'error', message: '{@js} requires allowCode: true', span: node.span }); break
 			}
 		}
 	}

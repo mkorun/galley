@@ -3,7 +3,7 @@ import { locate } from './diagnostics.js';
 /** Names used by generated runtime calls must not be shadowed by template declarations. */
 const GENERATED_GLOBALS = new Set(['String', 'Object', 'Array', 'TypeError', 'undefined']);
 const invalidNames = new Map();
-export const lintAst = (ast, options, filters, scripted) => {
+export const lintAst = (ast, allowCode, filters, scripted) => {
     const diagnostics = [];
     const declarations = new Set();
     const used = new Set();
@@ -140,7 +140,7 @@ export const lintAst = (ast, options, filters, scripted) => {
                     break;
                 }
                 case 'js':
-                    if (!options.allowCode)
+                    if (!allowCode)
                         report({ code: 'G3004', severity: 'error', message: '{@js} requires allowCode: true', span: node.span });
                     break;
             }

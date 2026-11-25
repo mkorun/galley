@@ -19,8 +19,8 @@ export { parse } from './parser.js'
 
 const HTML: Readonly<Record<string, string>> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;' }
 
-/** JavaScript callers may pass non-booleans; lint and generation share this decision. */
-const normalizeOptions = (options: CompileOptions): CompileOptions => ({ ...options, allowCode: options.allowCode === true })
+/** Read the permission once; every other option stays on the caller's original object. */
+const codeAllowed = (options: CompileOptions): boolean => options.allowCode === true
 
 const expandPartials = async (ast: TemplateAst, options: CompileOptions): Promise<TemplateAst> => {
 	if (!contains(ast.children, 'partial')) return ast
@@ -58,14 +58,14 @@ const stripStatic = (nodes: readonly TemplateNode[], root = false): readonly Tem
 
 /** Lint uses the compiler's reader; unresolved partials preserve their entry context. */
 export async function lint(template: string, options: CompileOptions = {}): Promise<Diagnostic[]> {
-	options = normalizeOptions(options)
+	const allowCode = codeAllowed(options)
 	const filters = filterRegistry(options)
 	const diagnostics: Diagnostic[] = []
 	try {
 		const parsed = parse({ id: options.sourceId ?? '<template>', text: template })
 		const ast = analyze(options.includes ? await expandPartials(parsed, options) : parsed)
 		const scripted = scriptedSnippets(ast.children)
-		diagnostics.push(...lintAst(ast, options, filters, scripted))
+		diagnostics.push(...lintAst(ast, allowCode, filters, scripted))
 		if (!diagnostics.some(item => item.severity === 'error')) {
 			const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
 			readContexts(prepared, options.strictBraces, scripted)
@@ -80,18 +80,18 @@ export async function lint(template: string, options: CompileOptions = {}): Prom
 export default async function galley<
 	Data extends object = Record<string, unknown>,
 >(template = '', options: CompileOptions = {}): Promise<CompiledTemplate<Data>> {
-	options = normalizeOptions(options)
+	const allowCode = codeAllowed(options)
 	const filters = filterRegistry(options)
 	const source: SourceFile = { id: options.sourceId ?? '<template>', text: template }
 	const initial = parse(source)
 	const parsed = await expandPartials(initial, options)
 	const ast = analyze(parsed)
 	const scripted = scriptedSnippets(ast.children)
-	const diagnostics = lintAst(ast, options, filters, scripted)
+	const diagnostics = lintAst(ast, allowCode, filters, scripted)
 	const fatal = diagnostics.find(diagnostic => diagnostic.severity === 'error')
 	if (fatal) throw new GalleyDiagnosticError(fatal)
 	const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
-	const program = generate(readContexts(prepared, options.strictBraces, scripted), options)
+	const program = generate(readContexts(prepared, options.strictBraces, scripted), options, allowCode)
 	if (program.async) {
 		const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError) as (data: Data) => Promise<string>
 		return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) }
