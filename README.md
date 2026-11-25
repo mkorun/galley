@@ -723,6 +723,8 @@ Context-changing recursion is `G3011`. A snippet lexically visible to `{@js}` al
 specialization callable by JavaScript; `allowCode: true` alone does not require one. `String`, `Object`, `Array`,
 `TypeError` and `undefined` are reserved for generated runtime code (`G3007`). `lint()` keeps warnings beside context errors
 and accepts the same compile options. It always returns `Promise<Diagnostic[]>`: use `await lint(source, options)`.
+`galley()` and `lint()` build functions with `new Function()`. Run them at build time, in Bun or Node; in a web page,
+they need a Content Security Policy that allows `'unsafe-eval'`. The HTML they render needs no script.
 With `includes`, it resolves partials and applies the same context and `strip` checks as `galley()`. Without a resolver,
 it treats each partial as preserving its context and continues checking the surrounding template.
 
