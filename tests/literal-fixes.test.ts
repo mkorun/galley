@@ -85,6 +85,16 @@ test('G1107: a number beyond Number.MAX_SAFE_INTEGER is refused in brackets and 
 	for (const number of ['9007199254740992', '9007199254740993', '-9007199254740993', '9007199254740991.5', '1000000000000000000000', nines, `${nines}.5`]) {
 		for (const source of [`{@raw ${number}}`, `{#if n === ${number}}y{/if}`, `{@const n = ${number}}`, `{ n ?? ${number} }`, `{ n | oneOf(${number}) }`]) await numberError(source, number, 'G1107', help)
 	}
+	// Decided on the spelling: Number() rounds each of these to the bound itself.
+	const rounded = ['9007199254740991.1', '-9007199254740991.1', '9007199254740991.499', '-9007199254740991.000001', ...'123456789'.split('').map(digit => `9007199254740991.0${digit}`)]
+	for (const number of rounded) {
+		for (const source of [`{@raw ${number}}`, `{@const n = ${number}}{ n }`, `{ n | oneOf(${number}) }`, `{#snippet s(x)}{ x }{/snippet}{@render s(${number})}`]) await numberError(source, number, 'G1107', help)
+		const includes = { import: () => Promise.resolve(`{@raw ${number}}`) }
+		for (const result of [await galley('{@partial p.sort}', { includes }).catch(error => error.diagnostic), (await lint('{@partial p.sort}', { includes }))[0]]) {
+			expect(result.code).toBe('G1107')
+			expect(result.span.source.text.slice(result.span.start, result.span.end)).toBe(number)
+		}
+	}
 	// 0.5.0 wrote Infinity as an identifier that a constant could shadow.
 	await numberError(`{@const Infinity = 'x'}{ a[${nines}] }`, nines, 'G1107', help)
 })
@@ -98,5 +108,8 @@ test('a safe integer in brackets reaches the generated code as the integer the t
 		expect(template.render({ a })).toBe(expected)
 		expect(template.source).toContain(`?.[${path.slice(2, -1).trim().replace('-0', '0')}]`)
 	}
-	for (const number of ['9007199254740991', '-9007199254740991']) expect((await galley(`{@raw ${number}}`)).render({})).toBe(String(Number(number)))
+	for (const number of ['9007199254740991', '-9007199254740991', '9007199254740991.0', '-9007199254740991.000', '9007199254740990.5', '0.5', '1.25', '-1.25']) {
+		expect(await lint(`{ ${number} }`)).toEqual([])
+		expect((await galley(`{@raw ${number}}`)).render({})).toBe(String(Number(number)))
+	}
 })

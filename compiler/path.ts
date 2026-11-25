@@ -11,9 +11,11 @@ const isSpecial = (code: number): boolean =>
 /** A number the template writes, in brackets or as a literal: without a leading zero, and small enough for the generated code to read exactly. */
 export const parseNumber = (raw: string, at: SourceSpan): number => {
 	if (/^-?0\d/.test(raw)) fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`)
-	const value = Number(raw)
-	if (Math.abs(value) > Number.MAX_SAFE_INTEGER) fail('G1107', `Number ${raw} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`, at, 'Write it as a quoted string, or pass it in template data.')
-	return value
+	// Decide on the spelling: Number() already rounds 9007199254740991.1 down to the bound.
+	const [integer = '', fraction = ''] = raw.replace('-', '').split('.')
+	const limit = BigInt(Number.MAX_SAFE_INTEGER)
+	if (BigInt(integer) > limit || (BigInt(integer) === limit && /[^0]/.test(fraction))) fail('G1107', `Number ${raw} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`, at, 'Write it as a quoted string, or pass it in template data.')
+	return Number(raw)
 }
 
 /** Number diagnostics stand where a malformed expression would otherwise become literal text or another diagnostic. */
