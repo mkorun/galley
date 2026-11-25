@@ -1,5 +1,5 @@
 import { fail, span } from './diagnostics.js';
-import { checkPathRoots, parseNumber, parsePath } from './path.js';
+import { checkNumber, checkPath, parsePath } from './path.js';
 const PRECEDENCE = { '??': 1, '||': 2, '&&': 3, '===': 4, '!==': 4, '>': 4, '<': 4, '>=': 4, '<=': 4 };
 const ORDERED_OPERATORS = ['===', '!==', '>=', '<=', '??', '||', '&&', '>', '<'];
 const splitTopLevel = (raw, separator) => {
@@ -50,7 +50,7 @@ const literal = (raw, at) => {
         return { kind: 'literal', value: body, raw, span: at };
     }
     if (/^-?\d+(?:\.\d+)?$/.test(raw))
-        return { kind: 'literal', value: parseNumber(raw, at), raw, span: at };
+        return { kind: 'literal', value: Number(raw), raw, span: at };
     if (raw === 'true' || raw === 'false')
         return { kind: 'literal', value: raw === 'true', raw, span: at };
     if (raw === 'null')
@@ -188,25 +188,30 @@ const parsePiped = (rawInput, atInput) => {
     const node = { kind: 'pipe', input, pipes, span: at };
     return node;
 };
-export const checkRoots = (expression) => {
+/** The checks that wait for the complete expression: first path names and numbers. */
+export const checkExpression = (expression) => {
     if (expression.kind === 'path')
-        checkPathRoots(expression);
+        checkPath(expression);
+    else if (expression.kind === 'literal') {
+        if (typeof expression.value === 'number')
+            checkNumber(expression.raw, expression.span);
+    }
     else if (expression.kind === 'unary')
-        checkRoots(expression.operand);
+        checkExpression(expression.operand);
     else if (expression.kind === 'binary') {
-        checkRoots(expression.left);
-        checkRoots(expression.right);
+        checkExpression(expression.left);
+        checkExpression(expression.right);
     }
     else if (expression.kind === 'pipe') {
-        checkRoots(expression.input);
+        checkExpression(expression.input);
         for (const pipe of expression.pipes)
             for (const argument of pipe.args)
-                checkRoots(argument);
+                checkExpression(argument);
     }
 };
 export const parseExpression = (raw, at) => {
     const expression = parsePiped(raw, at);
-    checkRoots(expression);
+    checkExpression(expression);
     return expression;
 };
 //# sourceMappingURL=expression.js.map

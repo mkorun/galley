@@ -8,23 +8,25 @@ const isStart = (code: number): boolean =>
 const isSpecial = (code: number): boolean =>
 	isStart(code) || (code >= 48 && code <= 57) || code === 58 || code === 43 || code === 45
 
-/** A number the template writes, in brackets or as a literal: without a leading zero, and small enough for the generated code to read exactly. */
-export const parseNumber = (raw: string, at: SourceSpan): number => {
+/** A number the template writes, in brackets or as a literal: without a leading zero, and within Number.MAX_SAFE_INTEGER as written. */
+export const checkNumber = (raw: string, at: SourceSpan): void => {
 	if (/^-?0\d/.test(raw)) fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`)
 	// Decide on the spelling: Number() already rounds 9007199254740991.1 down to the bound.
 	const [integer = '', fraction = ''] = raw.replace('-', '').split('.')
 	const limit = BigInt(Number.MAX_SAFE_INTEGER)
 	if (BigInt(integer) > limit || (BigInt(integer) === limit && /[^0]/.test(fraction))) fail('G1107', `Number ${raw} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`, at, 'Write it as a quoted string, or pass it in template data.')
-	return Number(raw)
 }
 
-/** Number diagnostics stand where a malformed expression would otherwise become literal text or another diagnostic. */
+/** Number diagnostics come from a complete expression: they stand where a malformed one would become literal text or another diagnostic. */
 export const isNumberDiagnostic = (code: string): boolean => code === 'G1106' || code === 'G1107'
 
-/** Check after parsing the complete expression, so an otherwise malformed brace stays literal under ADR-015. */
-export const checkPathRoots = (path: PathExpression): void => {
+/** First path names and numbers are checked after parsing the complete expression, so an otherwise malformed brace stays literal under ADR-015. */
+export const checkPath = (path: PathExpression): void => {
 	if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(path.root)) fail('G1007', `The first path name must be an identifier: ${JSON.stringify(path.root)}`, path.span, `Use $.${path.root} to reach that data key.`)
-	for (const segment of path.segments) if (typeof segment.value === 'object') checkPathRoots(segment.value)
+	for (const segment of path.segments) {
+		if (typeof segment.value === 'object') checkPath(segment.value)
+		else if (segment.number) checkNumber(segment.number.raw, segment.number.span)
+	}
 }
 
 export const parsePath = (raw: string, at: SourceSpan): PathExpression => {
@@ -71,7 +73,7 @@ export const parsePath = (raw: string, at: SourceSpan): PathExpression => {
 			const innerOffset = raw.indexOf(inner, innerStart)
 			i++
 			if (/^-?\d+$/.test(inner)) {
-				segments.push({ kind: 'computed', value: parseNumber(inner, localSpan(innerOffset, innerOffset + inner.length)), span: localSpan(start, i) })
+				segments.push({ kind: 'computed', value: Number(inner), span: localSpan(start, i), number: { raw: inner, span: localSpan(innerOffset, innerOffset + inner.length) } })
 			} else {
 				segments.push({ kind: 'computed', value: parsePath(inner, localSpan(innerOffset, innerOffset + inner.length)), span: localSpan(start, i) })
 			}

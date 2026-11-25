@@ -1,9 +1,9 @@
 import { LOOP_METADATA } from './ast.js';
 import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
-import { parseArguments, parseExpression, checkRoots } from './expression.js';
+import { parseArguments, parseExpression, checkExpression } from './expression.js';
 import { lex } from './lexer.js';
 import { textSpans } from './text.js';
-import { checkPathRoots, isNumberDiagnostic, parsePath } from './path.js';
+import { checkPath, isNumberDiagnostic, parsePath } from './path.js';
 // Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
 const literalBraces = new WeakMap();
 export const braceDiagnostic = (source, offset, strictBraces = false) => {
@@ -173,7 +173,7 @@ export const parseTokens = (source, input) => {
                 const rawArguments = arg.slice(open + 1, close);
                 const args = rawArguments.trim() ? parseArguments(rawArguments, span(at.source, at.start + open + 1, at.start + close), `snippet ${snippet}`) : [];
                 for (const argument of args)
-                    checkRoots(argument);
+                    checkExpression(argument);
                 return { kind: 'render', name: snippet, arguments: args, span: token.span };
             }
             default: return fail('G2100', `Unknown directive {@${name}}`, token.span, 'Supported directives are raw, partial, const, and render.');
@@ -234,7 +234,7 @@ export const parseTokens = (source, input) => {
         let collection;
         try {
             collection = parsePath(collectionRaw, collectionAt);
-            checkPathRoots(collection);
+            checkPath(collection);
         }
         catch (error) {
             if (!(error instanceof GalleyDiagnosticError) || isNumberDiagnostic(error.diagnostic.code))

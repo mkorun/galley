@@ -113,3 +113,29 @@ test('a safe integer in brackets reaches the generated code as the integer the t
 		expect((await galley(`{@raw ${number}}`)).render({})).toBe(String(Number(number)))
 	}
 })
+
+test('a brace that is no galley expression stays text whatever numbers it holds, as in 0.5.0', async () => {
+	for (const tag of ['a[9007199254740992]()', 'a[007]()', 'a[007] === f()', 'a[9007199254740991.1]()']) {
+		const script = `<script>if (true) { ${tag}; }</script>`
+		const text = `<p>{ ${tag} }</p>`
+		for (const strictBraces of [false, true]) {
+			expect(await lint(script, { strictBraces })).toEqual([])
+			expect((await galley(script, { strictBraces })).render({})).toBe(script)
+		}
+		expect(await lint(text)).toEqual([])
+		expect((await galley(text)).render({})).toBe(text)
+		// With strictBraces the brace is refused for the reason 0.5.0 gave, not for its number.
+		const error = await galley(text, { strictBraces: true }).catch(error => error)
+		expect(error).toBeInstanceOf(GalleyDiagnosticError)
+		expect(error.diagnostic.code).toBe('G3019')
+		expect(error.diagnostic.message).toBe(tag.includes('.1]') ? 'Literal { in text: Expected a path segment, found "9"' : 'Literal { in text: Unexpected "()" after path')
+		expect(error.diagnostic.span.start).toBe(3)
+		expect((await lint(text, { strictBraces: true }))[0]).toEqual(error.diagnostic)
+	}
+	// A directive stops either way; a malformed one keeps the diagnostic 0.5.0 gave.
+	for (const [source, code] of [['{@const a = a[007]()}', 'G2108'], ['{#each a[007]() as x}{/each}', 'G2216'], ['{#if a[007]()}y{/if}', 'G1006'], ['{@raw a[9007199254740992]()}', 'G1006']]) {
+		const error = await galley(source!).catch(error => error)
+		expect(error.diagnostic.code).toBe(code)
+		expect((await lint(source!))[0]).toEqual(error.diagnostic)
+	}
+})

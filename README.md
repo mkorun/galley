@@ -273,7 +273,8 @@ the number, with a suggested `7` or `-1`. `0`, `-0` and `0.5` are valid. A numbe
 `Number.MAX_SAFE_INTEGER` (9007199254740991), such as `a[9007199254740993]` or `{#if n === 1000000000000000000000}`,
 is G1107 at the number, decided as written: `9007199254740991.1` is refused too, though JavaScript would round it to the
 bound. Beyond that bound JavaScript numbers skip integers. Quote a larger key, as in
-`a['9007199254740993']`, or pass a larger number in data. Quoted literals can be operands, as in
+`a['9007199254740993']`, or pass a larger number in data. Both apply once the whole tag parses as an expression: an
+output that does not, such as `{ a[007](); }` in a script, stays literal text. Quoted literals can be operands, as in
 `{#if 'x' === 'y'}`; a single literal containing its own quote or an escape remains G1101.
 
 **Logical operators** (`&&` `||`):
