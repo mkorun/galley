@@ -95,14 +95,13 @@ export default async function galley(template = '', options = {}) {
     if (fatal)
         throw new GalleyDiagnosticError(fatal);
     const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
-    const read = readContexts(prepared, options.strictBraces, scripted);
+    const program = generate(readContexts(prepared, options.strictBraces, scripted), options, allowCode);
+    const create = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return ${program.async ? 'async ' : ''}function($){${program.body}}`);
+    // After the generated code compiles: a template 0.5.0 could not compile keeps its error.
     checkTemplateNumbers(ast.children);
-    const program = generate(read, options, allowCode);
-    if (program.async) {
-        const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
-        return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
-    }
-    const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
-    return { async: false, diagnostics, render, ...(options.debug ? { source: program.body } : {}) };
+    const render = create(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
+    if (program.async)
+        return { async: true, diagnostics, render: render, ...(options.debug ? { source: program.body } : {}) };
+    return { async: false, diagnostics, render: render, ...(options.debug ? { source: program.body } : {}) };
 }
 //# sourceMappingURL=index.js.map

@@ -180,3 +180,16 @@ test('the checks 0.6.0 added for numbers run last, on a template that passes eve
 	expect((await lint(raw)).map(diagnostic => diagnostic.code)).toEqual(['G3002', 'G1107'])
 	await expect(galley(raw)).rejects.toThrow('G1107')
 })
+
+test('a template whose generated code 0.5.0 could not compile throws that same error, not a number diagnostic', async () => {
+	for (const prefix of ['{@const x = 9007199254740992}', '{ a[007] }']) {
+		for (const strictBraces of [false, true]) {
+			const error = await galley(`${prefix}{@js}return (;{@js}`, { allowCode: true, strictBraces }).catch(error => error)
+			expect(error).toBeInstanceOf(SyntaxError)
+			expect(error.message).toBe("Unexpected token ';'")
+			// Lint never compiles the generated code: as in 0.5.0 it does not see that error, and reports the number.
+			expect((await lint(`${prefix}{@js}return (;{@js}`, { allowCode: true, strictBraces })).map(diagnostic => diagnostic.code)).toEqual([prefix.includes('a[007]') ? 'G1106' : 'G1107'])
+			await expect(galley(`${prefix}{@js}return 1{@js}`, { allowCode: true, strictBraces })).rejects.toThrow(prefix.includes('a[007]') ? 'G1106' : 'G1107')
+		}
+	}
+})
