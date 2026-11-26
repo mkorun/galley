@@ -116,9 +116,9 @@ export const compare = async (compiler: Compiler, recorded: { corpus: string; re
 const unexpected = (classes: Record<string, number>): boolean => Object.keys(classes).some(kind => kind.startsWith('unexpected'))
 
 /** `--record <directory>` runs 0.5.0 from a copy of its sources; without arguments the shipped compiler is compared. */
-export const main = async (args: readonly string[], file: URL): Promise<boolean> => {
+export const main = async (args: readonly string[], file: URL, cases = corpus()): Promise<boolean> => {
 	if (args.length === 2 && args[0] === '--record') {
-		const recorded = await record(await import(pathToFileURL(join(args[1]!, 'index.ts')).href) as Compiler, corpus())
+		const recorded = await record(await import(pathToFileURL(join(args[1]!, 'index.ts')).href) as Compiler, cases)
 		// One row per case: output, error, lint, expressions.
 		const rows = recorded.results.map(result => JSON.stringify([result.output, result.error, result.lint, result.expressions]))
 		await Bun.write(file, `{"corpus":${JSON.stringify(recorded.corpus)},"rows":[\n${rows.join(',\n')}\n]}\n`)
@@ -128,7 +128,7 @@ export const main = async (args: readonly string[], file: URL): Promise<boolean>
 	if (args.length) throw new Error('usage: bun differential/numbers-run.ts [--record <directory with 0.5.0 sources>]')
 	const { corpus: digestOfCorpus, rows } = JSON.parse(await Bun.file(file).text()) as { corpus: string; rows: [Result['output'], Result['error'], Result['lint'], Recorded['expressions']][] }
 	const results = rows.map(([output, error, lint, expressions]) => ({ output, error, lint, expressions }))
-	const report = await compare(await import('../index.js') as Compiler, { corpus: digestOfCorpus, results })
+	const report = await compare(await import('../index.js') as Compiler, { corpus: digestOfCorpus, results }, cases)
 	console.log(JSON.stringify(report, null, 2))
 	return !unexpected(report.classes)
 }

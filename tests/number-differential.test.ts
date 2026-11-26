@@ -9,27 +9,41 @@ import { classify, compare, corpus, corpusDigest, main, record, run, type Compil
 const compiler = galley as unknown as Compiler
 const recorded = new URL('../differential/NUMBERS-0.5.0.json', import.meta.url)
 
-test('against recorded 0.5.0, numbers differ only by the new refusals, in tags 0.5.0 compiled', async () => {
-	expect(corpus()).toHaveLength(14976)
-	const { corpus: digest, rows } = JSON.parse(await Bun.file(recorded).text()) as { corpus: string; rows: [string | null, never, never[], [number, number][]][] }
-	const report = await compare(compiler, { corpus: digest, results: rows.map(([output, error, lint, expressions]) => ({ output, error, lint, expressions })) })
+test('against recorded 0.5.0, numbers differ only by the new refusals, in tags 0.5.0 compiled', () => {
+	// The full corpus runs in its own process: the campaign's loop budget is shared by the whole test process.
+	const result = Bun.spawnSync(['bun', 'differential/numbers-run.ts'], { cwd: join(import.meta.dir, '..'), stdout: 'pipe', stderr: 'pipe', timeout: 60000 })
+	expect(new TextDecoder().decode(result.stderr)).toBe('')
+	expect(result.exitCode).toBe(0)
+	const report = JSON.parse(new TextDecoder().decode(result.stdout))
 	expect(report.classes).toEqual({ same: 13456, 'new refusal G1106 (number in brackets)': 328, 'new refusal G1107': 1192 })
 	expect(report.examples).toEqual({ same: '"<p>{ 7 }</p>" strictBraces=false', 'new refusal G1106 (number in brackets)': '"<p>{ a[007] }</p>" strictBraces=false', 'new refusal G1107': '"<p>{@raw 9007199254740992}</p>" strictBraces=false' })
-	// The review's cases stay as 0.5.0 left them.
-	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>']) {
-		const index = corpus().findIndex(item => item.source === source)
-		expect(index).toBeGreaterThanOrEqual(0)
-		const row = rows[index]!
-		expect(classify(corpus()[index]!, { output: row[0], error: row[1], lint: row[2], expressions: row[3] }, await run(compiler, corpus()[index]!))).toBe('same')
+}, 70000)
+
+test('the review cases are in the corpus and stay as 0.5.0 left them', async () => {
+	const { rows } = JSON.parse(await Bun.file(recorded).text()) as { rows: [string | null, never, never[], [number, number][]][] }
+	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>', '<p>{ n === 007 || f() }</p>']) {
+		for (const strictBraces of [false, true]) {
+			const index = corpus().findIndex(item => item.source === source && item.strictBraces === strictBraces)
+			expect(index).toBeGreaterThanOrEqual(0)
+			const [output, error, lint, expressions] = rows[index]!
+			expect(classify(corpus()[index]!, { output, error, lint, expressions }, await run(compiler, corpus()[index]!))).toBe('same')
+		}
 	}
-}, 30000)
+})
 
 test('the comparison records, reads back and rejects another corpus or a usage it does not know', async () => {
 	const directory = await mkdtemp(join(tmpdir(), 'galley-numbers-'))
 	try {
 		const file = pathToFileURL(join(directory, 'record.json'))
-		expect(await main(['--record', join(import.meta.dir, '..')], file)).toBe(true)
-		expect(await main([], file)).toBe(true)
+		const cases = corpus().filter((_, index) => index % 1000 === 0)
+		expect(await main(['--record', join(import.meta.dir, '..')], file, cases)).toBe(true)
+		expect(await main([], file, cases)).toBe(true)
+		await expect(main([], recorded, cases)).rejects.toThrow('another corpus')
+		const changed = JSON.parse(await Bun.file(file).text())
+		changed.rows[0][0] = 'changed'
+		await Bun.write(file, JSON.stringify(changed))
+		expect(await main([], file, cases)).toBe(false)
+
 		await expect(main(['--record'], file)).rejects.toThrow('usage')
 	} finally { await rm(directory, { recursive: true, force: true }) }
 	const cases = corpus().slice(0, 4)

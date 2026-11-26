@@ -118,7 +118,8 @@ text, script and style, with `strictBraces` off and on. Output, error and lint d
 message digest and place. A case may differ only by a G1106 for a number in brackets or a G1107, where the number
 breaks the new rule as written, inside an expression 0.5.0 parsed, in a template 0.5.0 compiled, with 0.5.0's lint
 findings kept before it. `NUMBERS-0.5.0.json` holds the recorded 0.5.0 results, so a rerun needs no second build;
-`--record <directory>` records them again from a copy of the 0.5.0 sources. The gate runs the full comparison.
+`--record <directory>` records them again from a copy of the 0.5.0 sources. The gate runs the full comparison in a
+child process, outside the mutation campaign's shared loop budget, and pins its class counts.
 
 `bun differential/rule17-run.ts` runs the rule 17 family: 896 cases across text owners, attributes, inline comments,
 doctypes and text-owner end boundaries, with nine value/brace forms, four call paths (direct, snippet, partial
