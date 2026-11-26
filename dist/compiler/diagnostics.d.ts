@@ -10,4 +10,9 @@ export declare class GalleyDiagnosticError extends Error {
     constructor(diagnostic: Diagnostic);
 }
 export declare const fail: (code: string, message: string, at: SourceSpan, help?: string) => never;
+/** Syntax failures can be explained at an output tag; value restrictions retain their own source spans. */
+export declare class GalleySyntaxError extends GalleyDiagnosticError {
+}
+export declare const failSyntax: (code: string, message: string, at: SourceSpan, help?: string) => never;
+export declare const invalidTag: (message: string, at: SourceSpan, help?: string) => never;
 //# sourceMappingURL=diagnostics.d.ts.map

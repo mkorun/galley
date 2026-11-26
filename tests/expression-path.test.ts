@@ -39,7 +39,8 @@ test('expression literals and malformed strings keep their distinct values and d
 	for (const [raw, value] of [['-9.5', -9.5], ['0', 0], ['9', 9], ['false', false], ['true', true], ['null', null], ['undefined', undefined], ["'a'", 'a'], ['"b"', 'b']] as const) {
 		expect(expression(raw)).toMatchObject({ kind: 'literal', value, raw })
 	}
-	for (const raw of ["'a", '"b', '1x', '-name', '09x']) expect(() => expression(raw)).toThrow('G1001')
+	for (const raw of ["'", '"', "'a", '"b', '1x', '-name', '09x']) expect(() => expression(raw)).toThrow('G1001')
+	for (const raw of ["name'", 'name"']) expect(() => expression(raw)).toThrow('G1006')
 	for (const raw of ["'a'b'", '"a"b"', "'a\\b'", '"a\\b"']) expect(() => expression(raw)).toThrow('G1101')
 	for (const char of ['\n', '\r', '\u2028', '\u2029']) expect(() => expression(`'a${char}b'`)).toThrow('G1105')
 	expect(() => expression(' \t\n\r')).toThrow('G1100')

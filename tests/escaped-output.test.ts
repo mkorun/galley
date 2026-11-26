@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { render } from './helpers'
 
 describe('escaped output — { expr }', () => {
-	test('numeric dot segments fall back to literal template text', async () => {
-		expect(await render('{ items.0.name }', { items: [{ name: 'x' }] })).toBe('{ items.0.name }')
+	test('numeric dot segments are malformed tags', async () => {
+		await expect(render('{ items.0.name }', { items: [{ name: 'x' }] })).rejects.toThrow('G3019')
 	})
 
 	test('U+2028 and U+2029 in literal template text compile safely', async () => {
@@ -70,8 +70,9 @@ describe('escaped output — { expr }', () => {
 			.toBe('<a href="/path/">link</a>')
 	})
 
-	test('CSS-like content not treated as tag (ADR-015)', async () => {
-		expect(await render('<style>.btn {margin: 0}</style>')).toBe('<style>.btn {margin: 0}</style>')
+	test('CSS-like content requires escaped opening braces', async () => {
+		await expect(render('<style>.btn {margin: 0}</style>')).rejects.toThrow('G3019')
+		expect(await render('<style>.btn \\{margin: 0}</style>')).toBe('<style>.btn {margin: 0}</style>')
 	})
 
 	test('no-space variant also works', async () => {

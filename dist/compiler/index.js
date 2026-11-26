@@ -1,4 +1,4 @@
-import { analyze, checkTemplateNumbers, contains, scriptedSnippets } from './analysis.js';
+import { analyze, contains, scriptedSnippets } from './analysis.js';
 import { readContexts } from './context.js';
 import { UrlPrefix } from './url.js';
 import { stringify, filterWithWarnings, undefinedError } from './stringify.js';
@@ -71,8 +71,7 @@ export async function lint(template, options = {}) {
         diagnostics.push(...lintAst(ast, allowCode, filters, scripted));
         if (!diagnostics.some(item => item.severity === 'error')) {
             const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
-            readContexts(prepared, options.strictBraces, scripted);
-            checkTemplateNumbers(ast.children);
+            readContexts(prepared, scripted);
         }
     }
     catch (error) {
@@ -95,10 +94,8 @@ export default async function galley(template = '', options = {}) {
     if (fatal)
         throw new GalleyDiagnosticError(fatal);
     const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast;
-    const program = generate(readContexts(prepared, options.strictBraces, scripted), options, allowCode);
+    const program = generate(readContexts(prepared, scripted), options, allowCode);
     const create = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return ${program.async ? 'async ' : ''}function($){${program.body}}`);
-    // After the generated code compiles: a template 0.5.0 could not compile keeps its error.
-    checkTemplateNumbers(ast.children);
     const render = create(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError);
     if (program.async)
         return { async: true, diagnostics, render: render, ...(options.debug ? { source: program.body } : {}) };

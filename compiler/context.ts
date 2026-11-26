@@ -1,7 +1,6 @@
-import { braceDiagnostic } from './parser.js'
 import { scriptedSnippets } from './analysis.js'
 import type { HtmlRecord, HtmlSlot, SnippetNode, TagRecord, TemplateAst, TemplateNode, TextNode, ValueRecord } from './ast.js'
-import { textPosition, textSpans } from './text.js'
+import { textPosition } from './text.js'
 import { fail, GalleyDiagnosticError, locate } from './diagnostics.js'
 import type { SourceSpan } from './types.js'
 import { URL_LISTS, UrlPrefix } from './url.js'
@@ -61,7 +60,7 @@ interface Binding { readonly node: SnippetNode; readonly scope: Scope; readonly 
 interface Scope { readonly parent: Scope | null; readonly bindings: Map<string, Binding> }
 
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
-export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = scriptedSnippets(ast.children)): TemplateAst => {
+export const readContexts = (ast: TemplateAst, scripted = scriptedSnippets(ast.children)): TemplateAst => {
 	let identity = 0, sequence = 0
 	const starts: StaticStart[] = []
 	const variants = new Map<string, Variant>()
@@ -97,11 +96,9 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 		const at = (offset: number): SourceSpan => textPosition(node, offset)
 		const records: HtmlRecord[] = []
 		const open = context.open
-		let index = 0, brace = value.indexOf('{'), sourcePart = 0, sourceOffset = 0
-		const spans = textSpans(node)
+		let index = 0
 		while (index < value.length) {
 			const char = value[index]!
-			const scriptOrStyle = context.owner === 'script' || context.owner === 'style'
 			switch (context.state) {
 				case 'data': {
 					const less = value.indexOf('<', index)
@@ -204,17 +201,6 @@ export const readContexts = (ast: TemplateAst, strictBraces = false, scripted = 
 					index = less + 1
 					break
 				}
-			}
-			while (brace >= 0 && brace < index) {
-				if (!scriptOrStyle) {
-					while (sourceOffset + spans[sourcePart]!.end - spans[sourcePart]!.start <= brace) {
-						sourceOffset += spans[sourcePart]!.end - spans[sourcePart]!.start; sourcePart++
-					}
-					const part = spans[sourcePart]!
-					const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset, strictBraces)
-					if (diagnostic) throw new GalleyDiagnosticError(diagnostic)
-				}
-				brace = value.indexOf('{', brace + 1)
 			}
 		}
 		return { ...node, records, ...(open ? { open } : {}) }

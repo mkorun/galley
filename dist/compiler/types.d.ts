@@ -23,7 +23,7 @@ export interface IncludeResolver {
 export interface CompileOptions extends LintOptions {
     readonly includes?: IncludeResolver;
     readonly sourceId?: string;
-    /** Refuse unescaped literal braces outside script and style. Default: false. */
+    /** @deprecated Every unescaped { must begin a valid tag. Neither setting changes this rule. */
     readonly strictBraces?: boolean;
     /** Check written, iterated, bound and initial pipe values for undefined. Default: false. */
     readonly strictUndefined?: boolean;

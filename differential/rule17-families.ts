@@ -17,27 +17,27 @@ export const rule17Cases = () => {
 			['value', '{ value }', MARKER], ['root', '{ $.user-name }', MARKER], ['raw', '{@raw value}', MARKER],
 			['first-name', '{ user-name }', '{ user-name }'], ['escaped-brace', '\\{ user-name }', '{ user-name }'],
 			['malformed', '{ user-name + 1 }', '{ user-name + 1 }'], ['static', 'literal', 'literal'], ['non-tag', '{ !flag }', '{ !flag }'], ['unclosed', '{ !', '{ !'],
-		] as const) for (const form of ['direct', 'snippet', 'partial', 'fallback']) for (const strip of [false, true]) for (const strictBraces of [false, true]) {
-			const id = `${owner}-${kind}-${form}-${strip}-${strictBraces}`
+		] as const) for (const form of ['direct', 'snippet', 'partial', 'fallback']) for (const strip of [false, true]) {
+			const id = `${owner}-${kind}-${form}-${strip}`
 			const body = fragment + ' ' + MARKER
 			const removal = '<galley:config>x</galley:config><!-- removed -->\n\\{ ignored-name }\n'
 			const source = removal + (form === 'snippet' ? `{#snippet s()}${body}{/snippet}${prefix}{@render s()}${suffix}`
 				: form === 'fallback' ? `${prefix}{#each xs as x}unused{:else}${body}{/each}${suffix}`
 				: form === 'partial' ? `${prefix}{@partial p.sort}${suffix}` : prefix + body + suffix)
-			const options: CompileOptions = { strip, strictBraces, ...(form === 'partial' ? { includes: { import: async () => body } } : {}) }
+			const options: CompileOptions = { strip, ...(form === 'partial' ? { includes: { import: async () => body } } : {}) }
 			const refusal = protectedText && (kind === 'value' || kind === 'root') ? 'G3018'
-				: !protectedText && (kind === 'first-name' || (strictBraces && ['malformed', 'non-tag', 'unclosed'].includes(kind))) ? 'G3019' : null
+				: ['first-name', 'malformed', 'non-tag', 'unclosed'].includes(kind) ? 'G3019' : null
 			const expected = '{ ignored-name }' + (strip ? '' : '\n') + prefix + written + ' ' + MARKER + suffix
 			cases.push({ id, source, options, refusal, expected, place, offset: form === 'partial' ? body.indexOf(fragment) : source.indexOf(fragment) })
 		}
 	}
 	// Literal ranges consumed as comments, doctypes, or immediately after a text owner's end tag.
-	for (const owner of ['comment', 'doctype', 'script-end', 'style-end']) for (const escaped of [false, true]) for (const strip of [false, true]) for (const strictBraces of [false, true]) {
+	for (const owner of ['comment', 'doctype', 'script-end', 'style-end']) for (const escaped of [false, true]) for (const strip of [false, true]) {
 		const fragment = `${escaped ? '\\' : ''}{ !flag }`
-		const prefix = owner === 'comment' ? '<p><!-- ' : owner === 'doctype' ? '<!doctype html ' : `<${owner.slice(0, -4)}>{ !flag }</${owner.slice(0, -4)}><p>`
+		const prefix = owner === 'comment' ? '<p><!-- ' : owner === 'doctype' ? '<!doctype html ' : `<${owner.slice(0, -4)}>\\{ !flag }</${owner.slice(0, -4)}><p>`
 		const suffix = owner === 'comment' ? ` ${MARKER} --></p>` : owner === 'doctype' ? `><p>${MARKER}</p>` : ` ${MARKER}</p>`
 		const source = prefix + fragment + suffix
-		cases.push({ id: `${owner}-${escaped}-${strip}-${strictBraces}`, source, options: { strip, strictBraces }, refusal: strictBraces && !escaped ? 'G3019' : null, expected: prefix + '{ !flag }' + suffix, place: owner === 'comment' ? 'comment' : 'text:p', offset: prefix.length })
+		cases.push({ id: `${owner}-${escaped}-${strip}`, source, options: { strip }, refusal: !escaped ? 'G3019' : null, expected: prefix.replace('\\{', '{') + '{ !flag }' + suffix, place: owner === 'comment' ? 'comment' : 'text:p', offset: prefix.length })
 	}
 	return cases
 }

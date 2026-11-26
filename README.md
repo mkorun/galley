@@ -96,15 +96,23 @@ All template data lives in the context object `$`. `{ meta.title }` accesses `$.
 
 The first name of a path is an identifier (`A-Z`, `a-z`, `_` or `$`, followed by those characters or digits).
 Later names may also contain `:`, `+` and `-`: write `{ $.user-name }` or `{ meta.og:image }` for such data keys.
-An output that fails only this first-name rule is G3019 outside script/style, including in title, textarea and
-attributes. Other tags report their normal parse error. Write `\{` for a literal opening brace.
+An output that fails this first-name rule is G3019 in every context, with a hint to use `$.` for the data key.
+Other tags report their normal parse error.
 
-Inside script/style, an escaped value is G3018; HTML escaping cannot encode JavaScript or CSS. Pass data through
-`data-*` attributes or use `{@raw}` with your own encoding. A snippet reports the offending value and its render call.
-Write `\{` for a literal brace that was never meant as a value, including JavaScript and CSS braces.
-A brace whose first name contains `:`, `+` or `-` stays literal there: `<style>b{margin:0}</style>` now retains its CSS,
-and `<script>var n = "{ user-name }"</script>` retains those literal braces instead of inserting the data value.
-These rules are always on. Other malformed expressions stay literal by default; `strictBraces` opts into rejecting them.
+<a id="brace-rules"></a>
+
+Every unescaped `{` in template text must begin a valid template tag. Invalid openers, malformed tags and missing
+closing delimiters are compilation errors, including inside script and style. Write `\{` for a literal opening
+brace; a lone `}` remains literal. For a backslash right before a tag in HTML text or an attribute, write
+`&#92;`, as in `&#92;{ x }`. Braces inside config sections, removed comment lines and `{@js}` bodies are not tags.
+The rule also applies in attributes, other text elements, inline comments, snippets (used or unused), and partials.
+
+G3019 reports an invalid opener, a missing closing delimiter or a malformed plain output at the opening brace,
+with the parser's reason and help naming `\{`. For example, write `<style>b\{margin:0}</style>` for literal CSS,
+`<script>if (ready) \{ run(); }</script>` for literal JavaScript, and `\{ 7 }` for literal text.
+Output tags begin with a name, preceded only by spaces or tabs, not a number or `(`.
+A tag ends at the first `}`, also inside a quoted string; pass such text through template data.
+Arithmetic, ternaries, method calls and `{!-- --}` are not template syntax.
 
 The compiler also exports `lint()`, structured diagnostics, and the typed AST
 parser for editor and build-tool integrations:
@@ -273,11 +281,11 @@ the number, with a suggested `7` or `-1`. `0`, `-0` and `0.5` are valid. A numbe
 `Number.MAX_SAFE_INTEGER` (9007199254740991), such as `a[9007199254740993]` or `{#if n === 1000000000000000000000}`,
 is G1107 at the number, decided as written: `9007199254740991.1` is refused too, though JavaScript would round it to the
 bound. Beyond that bound JavaScript numbers skip integers. Quote a larger key, as in
-`a['9007199254740993']`, or pass a larger number in data. A leading-zero literal is refused as it is read, as in 0.5.0.
-A leading zero in brackets and G1107 are checked last, on a template that passes every other check: a template that
-0.5.0 refused keeps its diagnostic, and a brace that 0.5.0 kept as text, such as `{ a[007](); }` in a script, stays
-text. Quoted literals can be operands, as in
-`{#if 'x' === 'y'}`; a single literal containing its own quote or an escape remains G1101.
+`a['9007199254740993']`, or pass a larger number in data. The diagnostic points at the number in both `galley()` and `lint()`.
+Quoted literals can be operands, as in
+`{#if 'x' === 'y'}`. `'it's'` contains its own quote: G1101 in `{@raw}` or a condition, or G3019 with that reason
+in a plain output; write `"it's"`. Backslashes in literals are rejected the same way. `{@const}` wraps these syntax
+errors as G2108.
 
 **Logical operators** (`&&` `||`):
 
@@ -424,9 +432,8 @@ Embeds another template file **at compile time**. The partial is fully inlined i
 {@partial partials/footer.sort}
 ```
 
-The path is relative to `basedir` from the compiler options. Unsafe traversal,
-absolute, UNC, and Windows drive-prefixed paths are rejected before the include
-resolver is invoked.
+Partial paths are relative to `basedir` and may contain spaces; G2109 rejects quotes, NUL bytes, `..` segments,
+absolute and UNC paths, and Windows drive prefixes before the resolver runs.
 
 ---
 
@@ -622,18 +629,13 @@ interface GalleyOptions {
   strip?: boolean           // strip static whitespace before HTML checking (default: false)
   debug?: boolean           // expose generated function in tpl.source (default: false)
   strictUndefined?: boolean // reject undefined at checked render positions (default: false)
-  strictBraces?: boolean    // reject unescaped literal { outside script/style (default: false)
+  strictBraces?: boolean    // accepted but has no effect
   stripEmptyMeta?: boolean  // remove <meta content=""> and <link href=""> (default: true)
   filters?: Readonly<Record<string, (value: any, ...args: any[]) => unknown>> // add or replace built-ins
 }
 ```
 
-With `strictBraces: true`, every unescaped `{` outside script and style must parse as a template tag,
-including in title, textarea, attribute values and inline comments. Otherwise compilation and `lint()` report
-G3019 at the brace with the parser's reason. Write `\{` for literal text; a lone `}` stays literal.
-Arithmetic, ternaries, method calls and `{!-- --}` comments are not template syntax. The option defaults to false.
-Snippet braces are judged where the snippet is rendered; unused snippets are not judged, so the same partial can
-pass in one template and fail in another that renders its snippet in a different context.
+`strictBraces` is deprecated and has no effect; compilation and `lint()` always enforce the [brace rules](#brace-rules).
 
 With `strictUndefined: true`, rendering stops with G5002 when an output (escaped or raw), an each collection,
 a const value, or the first input of a pipe outside a condition is `undefined`. The error names the expression
@@ -645,7 +647,7 @@ Conditions (including their pipes) are lenient. Snippet arguments are checked wh
 but a pipe in an argument checks its initial input. Filter arguments and intermediate results are the filter's
 responsibility. A final undefined output still stops. Even an unused const is checked at binding;
 write `{@const optional = missing ?? ''}` for an optional alias. Skipped operands remain unevaluated.
-Both strict options default to false and can be enabled independently.
+`strictUndefined` defaults to false.
 
 ---
 
@@ -753,8 +755,7 @@ it treats each partial as preserving its context and continues checking the surr
   boundaries; it never trims whitespace supplied by dynamic values. Complete tags start and finish in ordinary text, so removal preserves the reader's
   context; apparent metadata inside quoted values, comments or text elements stays literal.
 
-- **Invalid output expressions fail differently depending on where they are.** Per ADR-015, a malformed plain `{ expr }` falls back to literal text — useful for avoiding false positives on CSS/JS-shaped content that happens to sit inside `{ }`, but it also means a typo in that position can silently do nothing instead of erroring. Structurally required expressions (`{#if}` conditions, `{#each}` collections, `{@render}` arguments) always raise a compile error instead, since there's no sensible literal fallback for them.
-- **The include resolver is responsible for real filesystem confinement of `{@partial}` paths.** galley rejects the syntactic red flags before ever calling the resolver — `..` segments, absolute roots, UNC and Windows drive-prefixed paths, NUL bytes — but it has no notion of your filesystem layout, so it cannot itself guarantee a resolved path stays inside any particular directory.
+- **The include resolver is responsible for real filesystem confinement of `{@partial}` paths.** galley checks partial-path syntax before calling the resolver, but it has no notion of your filesystem layout, so it cannot itself guarantee a resolved path stays inside any particular directory.
 
 ---
 
@@ -789,7 +790,7 @@ bun test   # unit tests
 | `code-blocks.test.ts` | `{@js}`, `await` |
 | **`partials.test.ts`** | **`{@partial}`, indentation, unsafe-path rejection (traversal, absolute, drive-prefixed)** |
 | `fallback.test.ts` | `?? fallback`, edge cases |
-| `escaping.test.ts` | Backslash escape `\{`, collision fallback |
+| `escaping.test.ts` | Backslash escape `\{`, literal braces |
 | `whitespace.test.ts` | Bidirectional block-tag stripping |
 | `const.test.ts` | `{@const}`, scoping, error handling |
 | `errors.test.ts` | Compile errors with line, column, and context snippet |

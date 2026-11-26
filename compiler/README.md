@@ -15,11 +15,14 @@ repository.
 source → cursor lexer → typed AST → partial expansion → lint/loop analysis → static strip → HTML context records → JavaScript codegen
 ```
 
-- `lexer.ts` removes config tags, escaped-brace backslashes and standalone comment lines everywhere.
-- `parser.ts` applies ADR-014/015 and joins adjacent literal texts.
-- `lexer.ts` has no regex-engine dependency.
+- `lexer.ts` removes config tags, escaped-brace backslashes and standalone comment lines, and recognizes
+  tag delimiters without a regex-engine dependency. Invalid openers and missing closing delimiters are G3019.
+- `parser.ts` applies ADR-014, joins adjacent literal texts and reports malformed plain outputs with G3019 at the
+  brace, preserving the syntax reason and escaping help.
 - `path.ts` and `expression.ts` produce structured expressions; raw template
-  fragments never reach code generation.
+  fragments never reach code generation. `checkNumber()` runs at numeric literals and bracket numbers, reporting
+  G1106/G1107 at the number. Syntax errors use `GalleySyntaxError` so tag explanations can wrap them without
+  changing value-restriction diagnostics or inspecting diagnostic codes.
 - Every token, expression, node, and diagnostic carries a source span.
 - `lint()` walks the AST and uses `new Function()` to ask the JavaScript engine whether each uncached bound name is valid in strict async JavaScript.
 - `context.ts` is the only HTML reader. It records placement, URL sinks and metadata boundaries; codegen does no HTML recognition. Snippets are specialized by structural context and write-checking contract, with recursive preservation verified before generation.

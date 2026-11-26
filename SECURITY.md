@@ -65,9 +65,7 @@ Breakouts may leave restrictions in force longer than the browser needs them.
 
 Rule 17 refuses escaped output in HTML `script` and `style` with G3018, including through snippets and partials.
 Static text and raw/JS output retain their existing rules.
-In `{ … }` output, a nonidentifier first path name is G3019 outside script/style and literal text inside them.
-Optional `strictBraces` also refuses other malformed unescaped braces outside script/style with G3019; the README
-defines the literal-brace rules.
+The [README's brace rules](README.md#brace-rules) apply in every context, including script/style and unused snippets.
 
 Comment lines are removed in the lexer everywhere, including script, title and attribute values, with any template
 tags they contain. Inline comments holding template tags are refused. Optional `strip` changes only static text,

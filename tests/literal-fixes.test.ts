@@ -18,17 +18,26 @@ test('G1106: leading-zero numbers fail at the literal, including negatives and d
 	}
 })
 
-test('quoted operands form comparisons; a literal containing its own quote is still G1101', async () => {
+test('quoted operands form comparisons; invalid literals keep their reason in conditions and outputs', async () => {
 	for (const [expression, expected] of [["'x' === 'y'", 'no'], ['"x" === "x"', 'yes'], ["'a' !== 'b'", 'yes'], ["'a' < 'b'", 'yes'], ["'a' === 'a' && 'b' === 'b'", 'yes'], ["'a' === 'b' || 'c' === 'c'", 'yes'], ["'a===b' === 'a===b'", 'yes'], ["'!<=>|?' === '!<=>|?'", 'yes']]) {
 		const source = `{#if ${expression}}yes{:else}no{/if}`
 		expect(await lint(source)).toEqual([])
 		expect((await galley(source)).render({})).toBe(expected)
 		expect((await galley(`{@const result = ${expression}}{ result }`)).render({})).toBe(expected === 'yes' ? 'true' : 'false')
 	}
-	for (const literal of ["'a'b'", '"a"b"', "'a\\b'", "'a<=>b'c'", "'a' + 'b'"]) {
-		await expect(galley(`{#if ${literal}}yes{/if}`)).rejects.toThrow('G1101')
-		expect((await lint(`{#if ${literal}}yes{/if}`))[0]!.code).toBe('G1101')
+	for (const literal of ["'it's'", "'a'b'", '"a"b"', "'a<=>b'c'", "'a'b'c'", '"a"b"c"', "'a\\b'", "'a<=>b'c'd'", "'a' + 'b'"]) {
+		for (const source of [`{#if ${literal}}yes{/if}`, `{@raw ${literal}}`]) {
+			await expect(galley(source)).rejects.toThrow('G1101')
+			expect((await lint(source))[0]!.code).toBe('G1101')
+		}
+		const source = `{ x ?? ${literal} }`
+		const error = await galley(source).catch(error => error)
+		expect(error.diagnostic.code).toBe('G3019')
+		expect(error.diagnostic.message).toContain('String literals may not contain quotes or escapes')
+		expect(await lint(source)).toEqual([error.diagnostic])
 	}
+	expect((await galley(`{@raw "it's"}`)).render({})).toBe("it's")
+	await expect(galley("{@const text = 'it's'}")).rejects.toThrow('G2108')
 })
 
 test('a quote at only one end cannot turn a path into a string', async () => {
@@ -59,8 +68,8 @@ const numberError = async (source: string, number: string, code: string, help: s
 	expect(error.diagnostic.span.start).toBe(source.indexOf(number))
 	expect(error.diagnostic.span.end).toBe(source.indexOf(number) + number.length)
 	expect(error.diagnostic.help).toBe(help)
-	// Lint keeps the findings of 0.5.0, such as G3002 for raw output, beside the number's error.
-	expect((await lint(source)).filter(diagnostic => diagnostic.severity === 'error')).toEqual([error.diagnostic])
+	// Numbers stop parsing before lint findings are collected.
+	expect(await lint(source)).toEqual([error.diagnostic])
 	return error.diagnostic.message as string
 }
 const placements = (path: string) => [`{ ${path} }`, `{@raw ${path}}`, `{@const x = ${path}}`, `{#if ${path}}y{/if}`, `{#each ${path} as x}{/each}`, `{#snippet s(x)}{ x }{/snippet}{@render s(${path})}`]
@@ -96,7 +105,7 @@ test('G1107: a number beyond Number.MAX_SAFE_INTEGER is refused in brackets and 
 			expect(result.span.source.text.slice(result.span.start, result.span.end)).toBe(number)
 		}
 	}
-	// Wherever the number stands in a template 0.5.0 compiled, unused snippets included.
+	// Numbers are checked wherever they are read, including in unused snippets.
 	const key = 'a[9007199254740992]'
 	for (const source of [`{#if p}{ ${key} }{/if}`, `{#if p}x{:else}{ ${key} }{/if}`, `{#each l as i}{ ${key} }{/each}`, `{#each l as i}x{:else}{ ${key} }{/each}`, `{#snippet s()}{ ${key} }{/snippet}`, `{#if !${key}}y{/if}`, `{ ${key} === n }`, `{ ${key} | upper }`]) await numberError(source, '9007199254740992', 'G1107', help)
 	// 0.5.0 wrote Infinity as an identifier that a constant could shadow.
@@ -113,83 +122,42 @@ test('a safe integer in brackets reaches the generated code as the integer the t
 		expect(template.source).toContain(`?.[${path.slice(2, -1).trim().replace('-0', '0')}]`)
 	}
 	for (const number of ['9007199254740991', '-9007199254740991', '9007199254740991.0', '-9007199254740991.000', '9007199254740990.5', '0.5', '1.25', '-1.25']) {
-		expect(await lint(`{ ${number} }`)).toEqual([])
+		expect((await lint(`{@raw ${number}}`)).map(diagnostic => diagnostic.code)).toEqual(['G3002'])
 		expect((await galley(`{@raw ${number}}`)).render({})).toBe(String(Number(number)))
 	}
 })
 
-test('a brace that is no galley expression stays text whatever numbers it holds, as in 0.5.0', async () => {
-	for (const tag of ['a[9007199254740992]()', 'a[007]()', 'a[007] === f()', 'a[9007199254740991.1]()']) {
-		const script = `<script>if (true) { ${tag}; }</script>`
-		const text = `<p>{ ${tag} }</p>`
-		for (const strictBraces of [false, true]) {
-			expect(await lint(script, { strictBraces })).toEqual([])
-			expect((await galley(script, { strictBraces })).render({})).toBe(script)
-		}
-		expect(await lint(text)).toEqual([])
-		expect((await galley(text)).render({})).toBe(text)
-		// With strictBraces the brace is refused for the reason 0.5.0 gave, not for its number.
-		const error = await galley(text, { strictBraces: true }).catch(error => error)
-		expect(error).toBeInstanceOf(GalleyDiagnosticError)
-		expect(error.diagnostic.code).toBe('G3019')
-		expect(error.diagnostic.message).toBe(tag.includes('.1]') ? 'Literal { in text: Expected a path segment, found "9"' : 'Literal { in text: Unexpected "()" after path')
-		expect(error.diagnostic.span.start).toBe(3)
-		expect((await lint(text, { strictBraces: true }))[0]).toEqual(error.diagnostic)
+test('numbers are checked as read, even before a later syntax error or a context refusal', async () => {
+	for (const [number, code, help] of [['007', 'G1106', 'Write 7 without leading zeros.'], ['9007199254740992', 'G1107', 'Write it as a quoted string, or pass it in template data.']]) {
+		for (const source of [
+			`<script>if (true) { a[${number}](); }</script>`, `<style>{ a[${number}] === foo-bar }</style>`,
+			`<p>{ a[${number}] | nofilter }</p>`, `{ user-name[${number}] }`,
+			`{@const a = a[${number}]()}`, `{#each a[${number}]() as x}{/each}`, `{#if a[${number}]()}y{/if}`,
+			`{@raw a[${number}]()}`, `{@const x = ${number}}{@js}return (;{@js}`,
+		]) await numberError(source, number!, code!, help!)
 	}
-	// A directive stops either way; a malformed one keeps the diagnostic 0.5.0 gave.
-	for (const [source, code] of [['{@const a = a[007]()}', 'G2108'], ['{#each a[007]() as x}{/each}', 'G2216'], ['{#if a[007]()}y{/if}', 'G1006'], ['{@raw a[9007199254740992]()}', 'G1006']]) {
-		const error = await galley(source!).catch(error => error)
-		expect(error.diagnostic.code).toBe(code)
-		expect((await lint(source!))[0]).toEqual(error.diagnostic)
-	}
-})
-
-test('a leading-zero literal is G1106 where 0.5.0 parsed it, even in a tag that parses no further', async () => {
-	for (const source of ['<p>{ n === 007 || f() }</p>', '<p>{ n | oneOf(007, ) }</p>', '<p>{ n | oneOf(007) | 1x }</p>', '<script>if (true) { n === 007 || f() }</script>']) {
-		for (const strictBraces of [false, true]) {
-			const error = await galley(source, { strictBraces }).catch(error => error)
-			expect(error).toBeInstanceOf(GalleyDiagnosticError)
-			expect(error.diagnostic.code).toBe('G1106')
-			expect(error.diagnostic.span.start).toBe(source.indexOf('007'))
-			expect(error.diagnostic.span.end).toBe(source.indexOf('007') + 3)
-			expect(await lint(source, { strictBraces })).toEqual([error.diagnostic])
-		}
-	}
-})
-
-test('the checks 0.6.0 added for numbers run last, on a template that passes every check of 0.5.0', async () => {
-	// The review's case: 0.5.0 leaves the brace as script text, since foo-bar is no galley root.
-	for (const number of ['9007199254740992', '007']) {
-		const source = `<script>if (true) { a[${number}] === foo-bar }</script>`
-		for (const strictBraces of [false, true]) {
-			expect(await lint(source, { strictBraces })).toEqual([])
-			expect((await galley(source, { strictBraces })).render({})).toBe(source)
-		}
-	}
-	// Each of these stopped in 0.5.0 for another reason, at the same place.
-	for (const [source, code, start, end] of [['<p>{ a[007] === foo-bar }</p>', 'G3019', 3, 4], ['<script>{ a[007] }</script>', 'G3018', 8, 18], ['<p>{ a[007] | nofilter }</p>', 'G3001', 14, 22], ['<p>{ user-name[9007199254740992] }</p>', 'G3019', 3, 4]] as const) {
-		for (const strictBraces of [false, true]) {
-			const error = await galley(source, { strictBraces }).catch(error => error)
-			expect(error).toBeInstanceOf(GalleyDiagnosticError)
-			expect([error.diagnostic.code, error.diagnostic.span.start, error.diagnostic.span.end]).toEqual([code, start, end])
-			expect((await lint(source, { strictBraces })).map(diagnostic => diagnostic.code)).toEqual([code])
-		}
-	}
-	// A template 0.5.0 compiled keeps its lint findings; the new refusal follows them.
+	// Decimal bracket keys are not in the path grammar; quoting is the supported spelling.
+	await expect(galley('{ a[9007199254740991.1]() }')).rejects.toThrow('G3019')
 	const raw = '<p>{@raw a[9007199254740992]}</p>'
-	expect((await lint(raw)).map(diagnostic => diagnostic.code)).toEqual(['G3002', 'G1107'])
-	await expect(galley(raw)).rejects.toThrow('G1107')
+	expect((await lint(raw)).map(diagnostic => diagnostic.code)).toEqual(['G1107'])
 })
 
-test('a template whose generated code 0.5.0 could not compile throws that same error, not a number diagnostic', async () => {
-	for (const prefix of ['{@const x = 9007199254740992}', '{ a[007] }']) {
-		for (const strictBraces of [false, true]) {
-			const error = await galley(`${prefix}{@js}return (;{@js}`, { allowCode: true, strictBraces }).catch(error => error)
-			expect(error).toBeInstanceOf(SyntaxError)
-			expect(error.message).toBe("Unexpected token ';'")
-			// Lint never compiles the generated code: as in 0.5.0 it does not see that error, and reports the number.
-			expect((await lint(`${prefix}{@js}return (;{@js}`, { allowCode: true, strictBraces })).map(diagnostic => diagnostic.code)).toEqual([prefix.includes('a[007]') ? 'G1106' : 'G1107'])
-			await expect(galley(`${prefix}{@js}return 1{@js}`, { allowCode: true, strictBraces })).rejects.toThrow(prefix.includes('a[007]') ? 'G1106' : 'G1107')
+test('quoted keys and strings are controls for number validation', async () => {
+	for (const key of ['007', '-01', '9007199254740993', '9007199254740991.1', '9'.repeat(310)]) {
+		for (const quote of ["'", '"']) {
+			expect((await galley(`{ a[${quote}${key}${quote}] }`)).render({ a: { [key]: 'kept' } })).toBe('kept')
+			expect((await galley(`{@raw ${quote}${key}${quote}}`)).render({})).toBe(key)
 		}
+	}
+})
+
+test('a leading-zero literal is G1106 where it is read, even in a tag that parses no further', async () => {
+	for (const source of ['<p>{ n === 007 || f() }</p>', '<p>{ n | oneOf(007, ) }</p>', '<p>{ n | oneOf(007) | 1x }</p>', '<script>if (true) { n === 007 || f() }</script>']) {
+		const error = await galley(source).catch(error => error)
+		expect(error).toBeInstanceOf(GalleyDiagnosticError)
+		expect(error.diagnostic.code).toBe('G1106')
+		expect(error.diagnostic.span.start).toBe(source.indexOf('007'))
+		expect(error.diagnostic.span.end).toBe(source.indexOf('007') + 3)
+		expect(await lint(source)).toEqual([error.diagnostic])
 	}
 })

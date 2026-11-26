@@ -83,7 +83,7 @@ test('B5: G3022 refuses ungrouped operators with a rewrite for their position', 
 	expect(await render('{#if (!a) | oneOf(true)}y{/if}', {})).toBe('y')
 	expect(await render("{ a ?? 'fallback' | upper }")).toBe('FALLBACK')
 	expect(await render("{ a || b ?? 'fallback' | upper }")).toBe('FALLBACK')
-	expect(await render('{ (a || b) | upper }', { b: 'b' })).toBe('{ (a || b) | upper }')
+	await expect(render('{ (a || b) | upper }', { b: 'b' })).rejects.toThrow('G3019')
 })
 
 test('B5: lint finds filters and ambiguous pipes throughout expression trees', async () => {

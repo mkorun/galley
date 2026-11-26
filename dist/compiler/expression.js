@@ -1,5 +1,5 @@
-import { fail, span } from './diagnostics.js';
-import { checkLeadingZero, checkNumber, checkPathRoots, parsePath } from './path.js';
+import { failSyntax, span } from './diagnostics.js';
+import { checkNumber, checkPathRoots, parsePath } from './path.js';
 const PRECEDENCE = { '??': 1, '||': 2, '&&': 3, '===': 4, '!==': 4, '>': 4, '<': 4, '>=': 4, '<=': 4 };
 const ORDERED_OPERATORS = ['===', '!==', '>=', '<=', '??', '||', '&&', '>', '<'];
 const splitTopLevel = (raw, separator) => {
@@ -44,13 +44,13 @@ const literal = (raw, at) => {
         const quote = raw[0];
         const body = raw.slice(1, -1);
         if (body.includes(quote) || body.includes('\\'))
-            fail('G1101', 'String literals may not contain quotes or escapes', at);
+            failSyntax('G1101', 'String literals may not contain quotes or escapes', at);
         if (/[\n\r\u2028\u2029]/.test(body))
-            fail('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.');
+            failSyntax('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.');
         return { kind: 'literal', value: body, raw, span: at };
     }
     if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
-        checkLeadingZero(raw, at);
+        checkNumber(raw, at);
         return { kind: 'literal', value: Number(raw), raw, span: at };
     }
     if (raw === 'true' || raw === 'false')
@@ -94,11 +94,11 @@ const parsePipe = (rawInput, atInput) => {
     const open = raw.indexOf('(');
     const name = (open < 0 ? raw : raw.slice(0, open)).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
-        fail('G1102', `Invalid pipe name ${JSON.stringify(name)}`, at, pipeOperatorHelp(raw));
+        failSyntax('G1102', `Invalid pipe name ${JSON.stringify(name)}`, at, pipeOperatorHelp(raw));
     if (open < 0)
         return { name, args: [], span: at };
     if (!raw.endsWith(')'))
-        fail('G1103', `Pipe ${name} is missing its closing )`, at, pipeOperatorHelp(raw));
+        failSyntax('G1103', `Pipe ${name} is missing its closing )`, at, pipeOperatorHelp(raw));
     const body = raw.slice(open + 1, -1);
     return { name, args: parseArguments(body, span(at.source, at.start + open + 1, at.end - 1), `pipe ${name}`), span: at };
 };
@@ -112,7 +112,7 @@ export const parseArguments = (raw, at, owner) => {
         if (chunk.trim())
             args.push(parsePiped(chunk, argAt));
         else
-            fail('G1104', `Empty argument in ${owner}`, argAt);
+            failSyntax('G1104', `Empty argument in ${owner}`, argAt);
         start = end + 1;
     }
     return args;
@@ -120,7 +120,7 @@ export const parseArguments = (raw, at, owner) => {
 const parseCore = (rawInput, atInput) => {
     const { text: raw, span: at } = trimSpan(rawInput, atInput);
     if (!raw)
-        fail('G1100', 'Expected an expression', at);
+        failSyntax('G1100', 'Expected an expression', at);
     if (hasOuterParentheses(raw))
         return { ...parsePiped(raw.slice(1, -1), span(at.source, at.start + 1, at.end - 1)), parenthesized: true };
     // The dominant template expression is a plain path. Avoid the operator
@@ -179,7 +179,7 @@ const parsePiped = (rawInput, atInput) => {
     const pipePositions = splitTopLevel(raw, '|').filter(i => raw[i - 1] !== '|' && raw[i + 1] !== '|');
     if (!pipePositions.length)
         return parseCore(raw, at);
-    const first = pipePositions[0] ?? fail('G1199', 'Internal pipe parser error', at);
+    const first = pipePositions[0] ?? failSyntax('G1199', 'Internal pipe parser error', at);
     const input = parseCore(raw.slice(0, first), span(at.source, at.start, at.start + first));
     const pipes = [];
     let start = first + 1;
@@ -204,31 +204,6 @@ export const checkRoots = (expression) => {
         for (const pipe of expression.pipes)
             for (const argument of pipe.args)
                 checkRoots(argument);
-    }
-};
-/** The number checks 0.6.0 added: a leading zero in brackets and a magnitude beyond Number.MAX_SAFE_INTEGER. */
-export const checkNumbers = (expression) => {
-    if (expression.kind === 'path') {
-        // A bracket holds no bracket (its scanner stops at the first ]), so only this path's own keys hold numbers.
-        for (const segment of expression.segments)
-            if (segment.number)
-                checkNumber(segment.number.raw, segment.number.span);
-    }
-    else if (expression.kind === 'literal') {
-        if (typeof expression.value === 'number')
-            checkNumber(expression.raw, expression.span);
-    }
-    else if (expression.kind === 'unary')
-        checkNumbers(expression.operand);
-    else if (expression.kind === 'binary') {
-        checkNumbers(expression.left);
-        checkNumbers(expression.right);
-    }
-    else if (expression.kind === 'pipe') {
-        checkNumbers(expression.input);
-        for (const pipe of expression.pipes)
-            for (const argument of pipe.args)
-                checkNumbers(argument);
     }
 };
 export const parseExpression = (raw, at) => {

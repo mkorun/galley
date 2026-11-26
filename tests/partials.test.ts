@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import galley from './compiler'
+import galley, { GalleyDiagnosticError, lint } from '../index.js'
 
 // In-memory virtual filesystem — maps path → template source
 const withFiles = (files: Record<string, string>) => ({
@@ -110,6 +110,38 @@ describe('{@partial}', () => {
 			await expect(galley(`{@partial ${path}}`, { includes })).rejects.toThrow(/unsafe partial path/i)
 		}
 		expect(imports).toBe(0)
+	})
+
+	test('partial paths reject either quote before the resolver, without swallowing later template text', async () => {
+		let imports = 0
+		const includes = { import: async () => { imports++; return 'unexpected' } }
+		for (const [source, path] of [
+			["{@partial 'card.sort'}", "'card.sort'"], ['{@partial "card.sort"}', '"card.sort"'],
+			["{@partial it's.sort}", "it's.sort"], ['{@partial a"b.sort}', 'a"b.sort'],
+			["{@partial it's.sort}\n", "it's.sort"], ['{@partial a"b.sort}\n', 'a"b.sort'],
+			["{@partial o'brien.sort}<p>it's</p>{@partial x.sort}", "o'brien.sort"],
+			['{@partial o"brien.sort}<p>it"s</p>{@partial x.sort}', 'o"brien.sort'],
+		]) {
+			const error = await galley(source!, { includes }).catch(error => error)
+			expect(error, source).toBeInstanceOf(GalleyDiagnosticError)
+			expect(error.diagnostic.code, source).toBe('G2109')
+			expect(error.diagnostic.message).toBe(`Unsafe partial path ${JSON.stringify(path)}`)
+			expect(error.diagnostic.help).toContain("'")
+			expect(error.diagnostic.help).toContain('"')
+			expect(error.diagnostic.span.start).toBe(0)
+			expect(error.diagnostic.span.end).toBe(source!.indexOf('}') + 1)
+			expect(await lint(source!, { includes })).toEqual([error.diagnostic])
+			expect(imports).toBe(0)
+		}
+	})
+
+	test('partial paths may contain spaces', async () => {
+		const paths: string[] = []
+		const includes = { basedir: 'templates', import: async (path: string) => { paths.push(path); return '<p>{ title }</p>' } }
+		const source = '{@partial parts with spaces/card name.sort}'
+		expect((await galley(source, { includes })).render({ title: 'ok' })).toBe('<p>ok</p>')
+		expect(await lint(source, { includes })).toEqual([])
+		expect(paths).toEqual(['templates/parts with spaces/card name.sort', 'templates/parts with spaces/card name.sort'])
 	})
 
 })

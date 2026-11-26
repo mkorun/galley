@@ -2,6 +2,14 @@ import { expect, spyOn, test } from 'bun:test'
 import galley, { lint } from '../index.js'
 import * as analysis from '../compiler/analysis.js'
 
+test('templates without dynamic metadata generate the same code with metadata removal enabled or disabled', async () => {
+	for (const source of ['<a href="{ url }">link</a>', '<meta content="static"><p>{ title }</p>']) {
+		const enabled = await galley(source, { debug: true })
+		const disabled = await galley(source, { debug: true, stripEmptyMeta: false })
+		expect(enabled.source).toBe(disabled.source)
+	}
+})
+
 test('scripted snippet analysis is shared with the reader and spans survive strip', async () => {
 	for (const strip of [false, true]) {
 		const marking = spyOn(analysis, 'scriptedSnippets')

@@ -37,6 +37,7 @@ test('G-40: snippets own the pending metadata newline flag', async () => {
 	expect(await render(source, { a: '' })).toBe('x\n<p>x</p>')
 })
 
-test('G-40: an unmatched JS delimiter advances as literal text', async () => {
-	expect(await render('a{@js}missing')).toBe('a{@js}missing')
+test('G-40: an unmatched JS delimiter is a malformed tag', async () => {
+	await expect(render('a{@js}missing')).rejects.toThrow('G3019')
+	expect(await render('a\\{@js}missing')).toBe('a{@js}missing')
 })

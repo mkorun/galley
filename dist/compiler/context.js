@@ -1,6 +1,5 @@
-import { braceDiagnostic } from './parser.js';
 import { scriptedSnippets } from './analysis.js';
-import { textPosition, textSpans } from './text.js';
+import { textPosition } from './text.js';
 import { fail, GalleyDiagnosticError, locate } from './diagnostics.js';
 import { URL_LISTS, UrlPrefix } from './url.js';
 const asciiLower = (value) => value.replace(/[A-Z]/g, letter => String.fromCharCode(letter.charCodeAt(0) + 32));
@@ -40,7 +39,7 @@ const staticValue = (context, at) => {
     }
 };
 /** The only HTML reader: accept writing rules, without predicting browser repair. */
-export const readContexts = (ast, strictBraces = false, scripted = scriptedSnippets(ast.children)) => {
+export const readContexts = (ast, scripted = scriptedSnippets(ast.children)) => {
     let identity = 0, sequence = 0;
     const starts = [];
     const variants = new Map();
@@ -84,11 +83,9 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
         const at = (offset) => textPosition(node, offset);
         const records = [];
         const open = context.open;
-        let index = 0, brace = value.indexOf('{'), sourcePart = 0, sourceOffset = 0;
-        const spans = textSpans(node);
+        let index = 0;
         while (index < value.length) {
             const char = value[index];
-            const scriptOrStyle = context.owner === 'script' || context.owner === 'style';
             switch (context.state) {
                 case 'data': {
                     const less = value.indexOf('<', index);
@@ -246,19 +243,6 @@ export const readContexts = (ast, strictBraces = false, scripted = scriptedSnipp
                     index = less + 1;
                     break;
                 }
-            }
-            while (brace >= 0 && brace < index) {
-                if (!scriptOrStyle) {
-                    while (sourceOffset + spans[sourcePart].end - spans[sourcePart].start <= brace) {
-                        sourceOffset += spans[sourcePart].end - spans[sourcePart].start;
-                        sourcePart++;
-                    }
-                    const part = spans[sourcePart];
-                    const diagnostic = braceDiagnostic(part.source, part.start + brace - sourceOffset, strictBraces);
-                    if (diagnostic)
-                        throw new GalleyDiagnosticError(diagnostic);
-                }
-                brace = value.indexOf('{', brace + 1);
             }
         }
         return { ...node, records, ...(open ? { open } : {}) };

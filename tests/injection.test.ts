@@ -11,24 +11,21 @@ import { render } from './helpers'
 describe('bracket-notation paths reject non-path content', () => {
 	test('quoted special dot segment cannot escape generated property access', async () => {
 		;(globalThis as any).__PWNED = false
-		const html = await render('{ meta.bad-"].constructor }', { meta: {} })
+		await expect(render('{ meta.bad-"].constructor }', { meta: {} })).rejects.toThrow('G3019')
 		expect((globalThis as any).__PWNED).toBe(false)
-		expect(html).toContain('meta.bad-"')
 	})
 
-	test('function-call payload in bracket path does not execute, falls back to literal', async () => {
+	test('function-call payload in bracket path fails compilation without executing', async () => {
 		;(globalThis as any).__PWNED = false
-		const html = await render(
+		await expect(render(
 			`{ meta[$.constructor.constructor('globalThis.__PWNED=true')()] }`,
 			{ meta: { title: 'x' } },
-		)
+		)).rejects.toThrow('G3019')
 		expect((globalThis as any).__PWNED).toBe(false)
-		expect(html).toContain('constructor')
 	})
 
-	test('nested brackets fall back to literal instead of producing broken JS', async () => {
-		const html = await render(`{ meta[tags[0]] }`, { meta: { a: 1 }, tags: ['a'] })
-		expect(html).toContain('meta[tags[0]]')
+	test('nested brackets fail compilation instead of producing broken JS', async () => {
+		await expect(render(`{ meta[tags[0]] }`, { meta: { a: 1 }, tags: ['a'] })).rejects.toThrow('G3019')
 	})
 
 	test('plain numeric index still resolves', async () => {
@@ -59,14 +56,13 @@ describe('{#each} collection expression rejects code injection', () => {
 
 describe('pipe arguments reject non-literal, non-path content', () => {
 
-	test('call-expression pipe argument does not execute, falls back to literal', async () => {
+	test('call-expression pipe argument fails compilation without executing', async () => {
 		;(globalThis as any).__PWNED = false
-		const html = await render(
+		await expect(render(
 			`{ meta.title | dateFormat(($.constructor.constructor('globalThis.__PWNED=true')(),0)) }`,
 			{ meta: { title: 'x' } },
-		)
+		)).rejects.toThrow('G3019')
 		expect((globalThis as any).__PWNED).toBe(false)
-		expect(html).toContain('constructor')
 	})
 
 	test('single literal arg still works', async () => {
@@ -112,7 +108,7 @@ describe('comparison RHS rejects code injection disguised as a string literal', 
 })
 
 describe('string literals require two quotes and generate code from their values', () => {
-	test('lone quotes are diagnostics in directives and literal text in outputs', async () => {
+	test('lone quotes are diagnostics in directives and outputs', async () => {
 		for (const quote of ["'", '"']) {
 			for (const [source, code] of [[`{#if ${quote}}x{/if}`, 'G1001'], [`{@const x = ${quote}}a`, 'G2108'], [`{@raw value | oneOf(${quote})}`, 'G1001']]) {
 				const error = await galley(source!).catch(error => error)
@@ -121,24 +117,25 @@ describe('string literals require two quotes and generate code from their values
 				expect((await lint(source!))[0]).toEqual(error.diagnostic)
 			}
 			for (const source of [`{ ${quote} }`, `{ value | oneOf(${quote}) }`]) {
-				expect((await galley(source)).render({ value: 'x' })).toBe(source)
-				expect(await lint(source)).toEqual([])
+				await expect(galley(source)).rejects.toThrow('G3019')
+				expect((await lint(source))[0]!.code).toBe('G3019')
 			}
 		}
 	})
 
-	test('two blocks with lone quotes cannot turn intervening text into JavaScript', async () => {
+	test('lone quotes cannot turn intervening tag-like text into JavaScript', async () => {
 		const target = globalThis as typeof globalThis & { canary?: string }
 		delete target.canary
 		try {
 			for (const quote of ["'", '"']) {
-				const source = `{#if a === ${quote}}+(globalThis.canary=\`ran without allowCode\`)+{/if}{#if b === ${quote}}x{/if}`
+				const value = '}+(globalThis.canary=`ran without allowCode`)+{/if}{#if b === '
+				const source = `{#if a === ${quote}${value}${quote}}x{/if}`
 				const result = await galley(source, { allowCode: false }).catch(error => error)
 				if (!(result instanceof Error)) result.render({})
 				expect(target.canary).toBeUndefined()
 				expect(result).toBeInstanceOf(GalleyDiagnosticError)
 				expect(result.diagnostic.code).toBe('G1001')
-				expect((await lint(source))[0]).toEqual(result.diagnostic)
+				expect(await lint(source)).toEqual([result.diagnostic])
 			}
 		} finally {
 			delete target.canary

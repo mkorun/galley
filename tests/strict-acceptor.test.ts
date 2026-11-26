@@ -50,11 +50,11 @@ test('G-19: end tags have a literal name, whitespace and >, without attributes',
 	expect(await render('</A \n>')).toBe('</A \n>')
 })
 
-test('G-20/G-22: no deletion can complete a stray <; parser joins lexer and ADR-015 seams', async () => {
+test('G-20/G-22: no deletion can complete a stray <; parser joins lexical removal seams', async () => {
 	for (const source of ['< <meta content="{ a }">a href="{ u }">', '<{#if p}{/if}\n<!-- c -->\na href="{ u }">', '<{#if p}meta content="{ a }"{/if}>', '<\n<!-- c -->a href="{ u }">']) await refuse(source)
 	await refuse('{@partial p.sort}a href="{ u }">', 'G3014', { includes: { import: async () => '<\n<!-- c -->' } })
 	expect(await render('<a<galley:config>x</galley:config> href="{ u }">', { u: '/ok' })).toBe('<a href="/ok">')
-	expect(await render('<style>{ color: red }</style>')).toBe('<style>{ color: red }</style>')
+	expect(await render('<style>\\{ color: red }</style>')).toBe('<style>{ color: red }</style>')
 	expect(parse({ id: 'join', text: 'a\\{b}c' }).children).toHaveLength(1)
 })
 

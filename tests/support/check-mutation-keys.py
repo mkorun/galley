@@ -29,11 +29,12 @@ for file, statements in {
     'util.ts': ['candidate === value', 'pluralRules.size < 100', 'pluralRules.set(locale, rules)'],
     'compiler/filters.ts': ["'knownFilters' in options", "typeof filter !== 'function'", 'Object.create(null)', 'Object.freeze(filters)'],
     'compiler/stringify.ts': ['warnOnFailure = previous', 'new Error(`G5002:'],
-    'compiler/analysis.ts': ["contains(nodes, 'js')", 'collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)', 'checkNumbers(node.collection)', 'checkTemplateNumbers(node.fallback'],
-    'compiler/expression.ts': ['checkLeadingZero(raw, at)', 'raw.length > 1', 'trimSpan(rawInput, atInput)', 'literal(raw, at)', 'checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0', 'checkNumber(segment.number.raw', 'checkNumber(expression.raw, expression.span)'],
-    'compiler/path.ts': ['checkPathRoots(segment.value)', "fail('G1106'", "fail('G1107'", 'checkLeadingZero(raw, at)'],
-    'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)', 'checkRoots(argument)', 'seen.add(param)'],
-    'compiler/index.ts': ['checkTemplateNumbers(ast.children)'],
+    'compiler/analysis.ts': ["contains(nodes, 'js')", 'collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)'],
+    'compiler/expression.ts': ['checkNumber(raw, at)', 'raw.length > 1', 'trimSpan(rawInput, atInput)', 'literal(raw, at)', 'checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0'],
+    'compiler/path.ts': ['checkPathRoots(segment.value)', "fail('G1106'", "fail('G1107'", 'checkNumber(inner, localSpan'],
+    'compiler/parser.ts': ['invalidTag(error.diagnostic.message', "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)', 'checkRoots(argument)', 'seen.add(param)'],
+    'compiler/diagnostics.ts': ['new GalleySyntaxError', "fail('G3019'"],
+    'compiler/lexer.ts': ["invalidTag('no closing }'", "invalidTag('no closing {@js}'", "invalidTag('a tag begins"],
 }.items():
     for statement in statements:
         assert any(m['file'] == file and statement in m['before'] for m in original), statement
@@ -43,6 +44,7 @@ for kind in ['expression source offset', 'expression source length', 'span arith
     assert any(m['file'] == 'compiler/parser.ts' and m['kind'] == kind for m in original), kind
 for kind in ['cache bound below', 'cache bound above', 'registry prototype', 'registry freeze', 'pipe expression span', 'pipe result span', 'untrimmed pipe expression', 'nonadjacent brace escape']:
     assert any(m['kind'] == kind for m in original), kind
+assert sum(m['file'] == 'compiler/parser.ts' and m['before'] == "/['\"]/" for m in original) == 2
 assert sum(m['kind'] == 'pipe name span' for m in original) == 2
 assert sum(m['kind'] == 'pipe grouping help' for m in original) == 2
 assert {m['before'] for m in original if m['kind'] == 'drop branch continuation'} == {"'if'", "'each'"}
@@ -68,7 +70,7 @@ for file, context, statement in [
     ('compiler/context.ts', 'recordStart', 'currentVariant.start'),
     ('compiler/context.ts', 'visit', 'startCallers.push(currentVariant)'),
     ('compiler/context.ts', 'readContexts', 'caller.start = pendingStarts[index]!.start'),
-    ('compiler/parser.ts', 'parseTokens', 'literalBraces.set(source, braces)'),
+    ('compiler/parser.ts', 'parseChildren', 'error instanceof GalleySyntaxError'),
     ('compiler/parser.ts', 'parseChildren', "continuations === 'each'"),
 ]:
     assert any(m['file'] == file and context in json.loads(m['id'])[1] and statement in m['before'] for m in original), (file, context, statement)

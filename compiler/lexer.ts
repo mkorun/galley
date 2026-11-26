@@ -1,5 +1,5 @@
 import type { SourceFile, SourceSpan } from './types.js'
-import { span } from './diagnostics.js'
+import { invalidTag, span } from './diagnostics.js'
 
 export type TokenKind = 'text' | 'expression' | 'block-open' | 'continuation' | 'block-close' | 'directive' | 'js'
 export interface Token { readonly kind: TokenKind; readonly value: string; readonly valueStart: number; readonly span: SourceSpan }
@@ -87,7 +87,7 @@ export const lex = (source: SourceFile): readonly Token[] => {
 		}
 		if (text.startsWith('{@js}', cursor)) {
 			const close = text.indexOf('{@js}', cursor + 5)
-			if (close < 0) { cursor++; continue }
+			if (close < 0) return invalidTag('no closing {@js}', span(source, cursor, cursor + 1))
 			pushText(cursor)
 			const end = close + 5
 			tokens.push({ kind: 'js', value: text.slice(cursor + 5, close), valueStart: cursor + 5, span: span(source, cursor, end) })
@@ -105,9 +105,9 @@ export const lex = (source: SourceFile): readonly Token[] => {
 			while (text.charCodeAt(p) === 32 || text.charCodeAt(p) === 9) p++
 			if (isIdentifierStart(text.charCodeAt(p))) kind = 'expression'
 		}
-		if (!kind) { cursor++; continue }
+		if (!kind) return invalidTag('a tag begins with a name (preceded only by spaces or tabs), #, :, / or @', span(source, cursor, cursor + 1))
 		const close = text.indexOf('}', contentStart)
-		if (close < 0) { cursor++; continue }
+		if (close < 0) return invalidTag('no closing }', span(source, cursor, cursor + 1))
 		pushText(cursor)
 		let valueStart = contentStart, valueEnd = close
 		while (valueStart < valueEnd && /\s/.test(text.charAt(valueStart))) valueStart++

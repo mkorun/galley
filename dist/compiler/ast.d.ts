@@ -9,11 +9,6 @@ export interface PathSegment {
     readonly kind: 'property' | 'computed';
     readonly value: string | number | PathExpression;
     readonly span: SourceSpan;
-    /** A number in brackets as written, checked once the whole expression has parsed. */
-    readonly number?: {
-        readonly raw: string;
-        readonly span: SourceSpan;
-    };
 }
 interface ExpressionBase {
     readonly parenthesized?: boolean;

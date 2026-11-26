@@ -1,7 +1,7 @@
 /** Mechanical compiler mutations. Uses the installed TypeScript parser, never text guesses about expressions. */
 import ts from 'typescript'
 const mutants: { file: string; start: number; end: number; before: string; after: string; kind: string; line: number; id: string }[] = []
-for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compiler/stringify.ts', 'compiler/analysis.ts', 'compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts', 'compiler/expression.ts', 'compiler/path.ts', 'compiler/parser.ts']) {
+for (const file of ['compiler/ast.ts', 'compiler/diagnostics.ts', 'util.ts', 'compiler/filters.ts', 'compiler/stringify.ts', 'compiler/analysis.ts', 'compiler/context.ts', 'compiler/url.ts', 'compiler/codegen.ts', 'compiler/lexer.ts', 'compiler/index.ts', 'compiler/lint.ts', 'compiler/expression.ts', 'compiler/path.ts', 'compiler/parser.ts']) {
 	const source = await Bun.file(file).text()
 	const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 	const add = (start: number, end: number, after: string, kind: string) => {
@@ -37,15 +37,15 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		[source.indexOf('const places:'), source.length],
 	] : file.endsWith('lexer.ts') ? [
 		[source.indexOf('const inspectLine ='), source.indexOf('const configEnd =')],
-		[source.indexOf("if (text.startsWith('{@js}'"), source.indexOf('let kind:')],
+		[source.indexOf('const isIdentifierStart'), source.indexOf('// Deliberately')],
+		[source.indexOf('if (current !== 123)'), source.length],
 	] : file.endsWith('index.ts') ? [[source.indexOf('const codeAllowed'), source.length]] : file.endsWith('parser.ts') ? [
-		[source.indexOf("if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')"), source.indexOf("return fail('G2108'")],
+		// The forbidden quote characters in partial paths.
+		[source.indexOf('if (/[', source.indexOf("case 'partial':")), source.indexOf(' || arg.includes', source.indexOf("case 'partial':"))],
+		[source.indexOf("if (!(error instanceof GalleySyntaxError))", source.indexOf("case 'const':")), source.indexOf("return fail('G2108'")],
 		[source.indexOf("case 'render':"), source.indexOf("default: return fail('G2100'")],
 		[source.indexOf('const parseSnippet'), source.indexOf('const astSpan')],
-		// B7a: a missing brace table is an error; only a first-name parse failure becomes G3019.
-		[source.indexOf('const literalBraces'), source.indexOf('/** Lexical removals')],
-		[source.indexOf("if (error.diagnostic.code === 'G1106')"), source.indexOf('// ADR-015:')],
-		[source.indexOf('const braces = new Map<number'), source.indexOf('// ADR-014')],
+		[source.indexOf("case 'expression':"), source.indexOf("case 'js':")],
 		// B2: which continuation ends a branch, and the each fallback's parse and source span.
 		[source.indexOf('const parseChildren ='), source.indexOf('const children: TemplateNode[]')],
 		[source.indexOf("if ((token.kind === 'block-close'"), source.indexOf('\n\t\t\tcursor++')],
@@ -54,7 +54,7 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		// Collection paths use the same first-name check as complete expressions.
 		[source.indexOf('for (const name of [item, index])'), source.indexOf('if (index === item)')],
 		[source.indexOf('try { collection = parsePath'), source.indexOf("const result = parseChildren('each', 'each')")],
-	] : [[0, source.length]]
+	] : file.endsWith('diagnostics.ts') ? [[source.indexOf('/** Syntax failures'), source.length]] : [[0, source.length]]
 	if (regions.some(([a,b]) => a! < 0 || b! <= a!)) throw new Error(`Unknown checkpoint region in ${file}`)
 	const visit = (node: ts.Node) => {
 		// Every grammar caller must retain its own offset, including callers outside the older checkpoint regions.
@@ -66,11 +66,12 @@ for (const file of ['compiler/ast.ts', 'util.ts', 'compiler/filters.ts', 'compil
 		if (file === 'compiler/parser.ts' && ts.isBinaryExpression(node) && node.getStart(ast) >= source.indexOf('const expressionSpan') && node.end < source.indexOf('/** Lexical removals')) change(node, node.left.getText(ast), 'span arithmetic')
 
 		if (!regions.some(([a,b]) => node.getStart(ast) >= a! && node.end <= b!)) { ts.forEachChild(node, visit); return }
+		if (file === 'compiler/diagnostics.ts' && ts.isNewExpression(node) && node.expression.getText(ast) === 'GalleySyntaxError') change(node, `new GalleyDiagnosticError(${node.arguments!.map(argument => argument.getText(ast)).join(', ')})`, 'syntax error kind')
 		if (ts.isExpressionStatement(node)) change(node, ';', 'delete statement')
 		if (ts.isReturnStatement(node) && node.expression) change(node.expression, 'undefined', 'drop returned value')
 		if (ts.isIfStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isSwitchStatement(node) || ts.isConditionalExpression(node)) flip(ts.isConditionalExpression(node) ? node.condition : node.expression)
 		if (ts.isForStatement(node) && node.condition) flip(node.condition)
-		if (file === 'compiler/parser.ts' && ts.isIfStatement(node) && node.expression.getText(ast) === "source.text[offset - 1] === '\\\\'") change(node.expression, `(${node.expression.getText(ast)} || source.text[offset - 2] === '\\\\')`, 'nonadjacent brace escape')
+		if (file === 'compiler/lexer.ts' && ts.isBinaryExpression(node) && node.getText(ast) === 'text.charCodeAt(cursor - 1) === 92') change(node, '(text.charCodeAt(cursor - 1) === 92 || text.charCodeAt(cursor - 2) === 92)', 'nonadjacent brace escape')
 		if (ts.isCaseClause(node)) change(node.expression, JSON.stringify('__mutation_unreachable_case__'), 'case comparison')
 		if (ts.isBinaryExpression(node)) {
 			const op = node.operatorToken.kind

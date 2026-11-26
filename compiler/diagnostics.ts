@@ -43,3 +43,14 @@ export const fail = (
 ): never => {
 	throw new GalleyDiagnosticError({ code, severity: 'error', message, span: at, ...(help ? { help } : {}) })
 }
+
+/** Syntax failures can be explained at an output tag; value restrictions retain their own source spans. */
+export class GalleySyntaxError extends GalleyDiagnosticError {}
+
+export const failSyntax = (code: string, message: string, at: SourceSpan, help?: string): never => {
+	throw new GalleySyntaxError({ code, severity: 'error', message, span: at, ...(help ? { help } : {}) })
+}
+
+export const invalidTag = (message: string, at: SourceSpan, help?: string): never => {
+	return fail('G3019', `Invalid template tag: ${message}`, at, `Write \\{ for a literal brace.${help ? ` ${help}` : ''}`)
+}

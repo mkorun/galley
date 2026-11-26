@@ -1,25 +1,12 @@
 import { LOOP_METADATA } from './ast.js';
-import { fail, GalleyDiagnosticError, span } from './diagnostics.js';
+import { fail, GalleySyntaxError, invalidTag, span } from './diagnostics.js';
 import { parseArguments, parseExpression, checkRoots } from './expression.js';
 import { lex } from './lexer.js';
 import { textSpans } from './text.js';
 import { checkPathRoots, parsePath } from './path.js';
-// Preserve the parser's reason by original source offset; HTML context decides whether this brace may stay literal.
-const literalBraces = new WeakMap();
-export const braceDiagnostic = (source, offset, strictBraces = false) => {
-    const braces = literalBraces.get(source);
-    if (!braces)
-        throw new Error(`Missing brace diagnostics for ${source.id}; parse the source before reading its HTML context`);
-    if (source.text[offset - 1] === '\\')
-        return undefined;
-    const reason = braces.get(offset);
-    if (!strictBraces && reason?.code !== 'G1007')
-        return undefined;
-    return { code: 'G3019', severity: 'error', message: `Literal { in text: ${reason?.message ?? (source.text.indexOf('}', offset + 1) < 0 ? 'no closing }' : 'a tag begins with a name, #, :, / or @')}`, span: span(source, offset, offset + 1), help: reason?.code === 'G1007' ? 'Write \\{ for a literal brace, or use $. to reach a data key with :, + or -.' : 'Write \\{ for a literal brace. Arithmetic, the ternary operator and method calls are not part of galley.' };
-};
 // The lexer trims token values. Callers retain the expression's offset from their grammar slice.
 const expressionSpan = (token, offset, length = token.value.length - offset) => span(token.span.source, token.valueStart + offset, token.valueStart + offset + length);
-/** Lexical removals and ADR-015 can leave a seam inside literal HTML. Read it as one text. */
+/** Lexical removals can leave a seam inside literal HTML. Read it as one text. */
 const joinTexts = (nodes) => {
     const result = [];
     let joinedSpans = null;
@@ -40,8 +27,6 @@ const joinTexts = (nodes) => {
 };
 export const parseTokens = (source, input) => {
     const tokens = [...input];
-    const braces = new Map();
-    literalBraces.set(source, braces);
     // ADR-014 as a token transform: structural tags on otherwise empty lines do
     // not leak their indentation/newline into the semantic AST.
     let sourceLineStart = 0, nextNewline = source.text.indexOf('\n');
@@ -95,13 +80,9 @@ export const parseTokens = (source, input) => {
                         children.push({ kind: 'output', expression: parseExpression(token.value, expressionSpan(token, 0)), raw: false, span: token.span });
                     }
                     catch (error) {
-                        if (!(error instanceof GalleyDiagnosticError))
+                        if (!(error instanceof GalleySyntaxError))
                             throw error;
-                        if (error.diagnostic.code === 'G1106')
-                            throw error;
-                        braces.set(token.span.start, error.diagnostic);
-                        // ADR-015: an expression-shaped CSS/JS collision remains literal text.
-                        children.push({ kind: 'text', value: token.span.source.text.slice(token.span.start, token.span.end), span: token.span });
+                        invalidTag(error.diagnostic.message, span(token.span.source, token.span.start, token.span.start + 1), error.diagnostic.help);
                     }
                     break;
                 }
@@ -116,11 +97,11 @@ export const parseTokens = (source, input) => {
                 case 'block-open':
                     children.push(parseBlock(token));
                     break;
-                case 'block-close': return fail('G2001', `Closing tag {/${token.value}} without matching opening tag`, token.span);
+                case 'block-close': return fail('G2001', `Closing tag {/${token.value}} without matching opening tag`, token.span, 'Write \\{ for a literal brace.');
                 case 'continuation':
                     if (continuations === 'each')
-                        return fail('G2002', `{#each} takes {:else} only, not {:${token.value}}`, token.span, 'Put an {#if} inside the {:else} branch.');
-                    return fail('G2002', `Continuation tag {:${token.value}} is only valid inside {#if}, and a single {:else} inside {#each}`, token.span);
+                        return fail('G2002', `{#each} takes {:else} only, not {:${token.value}}`, token.span, 'Put an {#if} inside the {:else} branch. Write \\{ for a literal brace.');
+                    return fail('G2002', `Continuation tag {:${token.value}} is only valid inside {#if}, and a single {:else} inside {#each}`, token.span, 'Write \\{ for a literal brace.');
             }
         }
         return { children: joinTexts(children), stop: null };
@@ -140,8 +121,8 @@ export const parseTokens = (source, input) => {
                     fail('G4002', 'Whitespace after @ is not supported for {@partial}', token.span, 'Write {@partial path} without whitespace after @.');
                 if (!arg)
                     fail('G2102', '{@partial} requires a path', token.span);
-                if (arg.includes('\0') || /^(?:[/\\]|[A-Za-z]:)/.test(arg) || arg.split(/[/\\]/).includes('..'))
-                    fail('G2109', `Unsafe partial path ${JSON.stringify(arg)}`, token.span, 'Use a relative path that stays inside the configured partial directory.');
+                if (/['"]/.test(arg) || arg.includes('\0') || /^(?:[/\\]|[A-Za-z]:)/.test(arg) || arg.split(/[/\\]/).includes('..'))
+                    fail('G2109', `Unsafe partial path ${JSON.stringify(arg)}`, token.span, 'Use a relative path without \' or " that stays inside the configured partial directory.');
                 return { kind: 'partial', path: arg, span: token.span };
             case 'const': {
                 const equals = arg.indexOf('=');
@@ -158,7 +139,7 @@ export const parseTokens = (source, input) => {
                     return { kind: 'const', name: variable, expression: parseExpression(rawExpression, valueAt), span: token.span };
                 }
                 catch (error) {
-                    if (!(error instanceof GalleyDiagnosticError) || error.diagnostic.code === 'G1106')
+                    if (!(error instanceof GalleySyntaxError))
                         throw error;
                     return fail('G2108', `Invalid expression in {@const ${arg}}`, valueAt, error.diagnostic.message);
                 }
@@ -176,7 +157,7 @@ export const parseTokens = (source, input) => {
                     checkRoots(argument);
                 return { kind: 'render', name: snippet, arguments: args, span: token.span };
             }
-            default: return fail('G2100', `Unknown directive {@${name}}`, token.span, 'Supported directives are raw, partial, const, and render.');
+            default: return fail('G2100', `Unknown directive {@${name}}`, token.span, 'Supported directives are raw, partial, const, and render. Write \\{ for a literal brace.');
         }
     };
     const parseBlock = (token) => {
@@ -186,7 +167,7 @@ export const parseTokens = (source, input) => {
             return parseEach(token);
         if (token.value.startsWith('snippet ') || token.value.startsWith('snippet\t'))
             return parseSnippet(token);
-        return fail('G2200', `Unknown block {#${token.value}}`, token.span, 'Supported blocks are if, each, and snippet.');
+        return fail('G2200', `Unknown block {#${token.value}}`, token.span, 'Supported blocks are if, each, and snippet. Write \\{ for a literal brace.');
     };
     const parseIf = (opening) => {
         const conditionRaw = opening.value.slice(2).trim();
@@ -237,7 +218,7 @@ export const parseTokens = (source, input) => {
             checkPathRoots(collection);
         }
         catch (error) {
-            if (!(error instanceof GalleyDiagnosticError))
+            if (!(error instanceof GalleySyntaxError))
                 throw error;
             return fail('G2216', `Invalid collection expression in {#each}: ${JSON.stringify(collectionRaw)}`, collectionAt, error.diagnostic.message);
         }

@@ -3,6 +3,7 @@ declare const Bun: {
 	version: string
 	spawn(command: string[], options: { timeout: number; stdout: 'pipe'; stderr: 'inherit' | 'pipe' }): { stdout: ReadableStream<Uint8Array>; stderr: ReadableStream<Uint8Array>; exited: Promise<number> }
 	CryptoHasher: new (algorithm: 'sha256') => { update(data: string): { digest(encoding: 'hex'): string } }
+	Glob: new (pattern: string) => { scan(root: string): AsyncIterable<string> }
 	file(path: string | URL): { text(): Promise<string> }
 	write(path: string | URL, data: string): Promise<number>
 	spawnSync(command: string[], options: { timeout: number; stdout: 'pipe'; stderr: 'pipe' }): { exitCode: number | null; exitedDueToTimeout: boolean; stdout: Uint8Array; stderr: Uint8Array }

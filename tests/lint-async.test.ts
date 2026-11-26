@@ -21,7 +21,6 @@ test('only boolean true allows JavaScript in compilation and lint', async () => 
 
 test('inherited options retain their values and original getter receivers', async () => {
 	const options: CompileOptions = Object.create({
-		strictBraces: true,
 		sourceId: 'inherited.sort',
 		get strictUndefined() { expect(this).toBe(options); return true },
 		get filters() { expect(this).toBe(options); return { mark: (value: unknown) => `[${value}]` } },

@@ -1,4 +1,4 @@
-import { span } from './diagnostics.js';
+import { invalidTag, span } from './diagnostics.js';
 const isIdentifierStart = (code) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || code === 36;
 // Deliberately cursor-based: no lookarounds, backreferences, or regex engine dependency.
 export const lex = (source) => {
@@ -103,10 +103,8 @@ export const lex = (source) => {
         }
         if (text.startsWith('{@js}', cursor)) {
             const close = text.indexOf('{@js}', cursor + 5);
-            if (close < 0) {
-                cursor++;
-                continue;
-            }
+            if (close < 0)
+                return invalidTag('no closing {@js}', span(source, cursor, cursor + 1));
             pushText(cursor);
             const end = close + 5;
             tokens.push({ kind: 'js', value: text.slice(cursor + 5, close), valueStart: cursor + 5, span: span(source, cursor, end) });
@@ -141,15 +139,11 @@ export const lex = (source) => {
             if (isIdentifierStart(text.charCodeAt(p)))
                 kind = 'expression';
         }
-        if (!kind) {
-            cursor++;
-            continue;
-        }
+        if (!kind)
+            return invalidTag('a tag begins with a name (preceded only by spaces or tabs), #, :, / or @', span(source, cursor, cursor + 1));
         const close = text.indexOf('}', contentStart);
-        if (close < 0) {
-            cursor++;
-            continue;
-        }
+        if (close < 0)
+            return invalidTag('no closing }', span(source, cursor, cursor + 1));
         pushText(cursor);
         let valueStart = contentStart, valueEnd = close;
         while (valueStart < valueEnd && /\s/.test(text.charAt(valueStart)))
