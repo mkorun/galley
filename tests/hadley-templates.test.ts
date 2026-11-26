@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test'
-import { measureHadley, runHadley } from '../differential/hadley.js'
+import { measureHadley, normalizeTemplatePath, runHadley } from '../differential/hadley.js'
 
 import { mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import corpus from '../differential/HADLEY-TEMPLATES.json' with { type: 'json' }
@@ -20,6 +20,13 @@ test('hadley: the committed corpus contains only the two public themes, with ide
 		first.outputs[key] = 'wrong'
 		await expect(measureHadley()).rejects.toThrow('Generated code differs from')
 	} finally { first.outputs[key] = expected }
+})
+
+test('hadley: external template paths use forward slashes', () => {
+	const path = win32.join('example', 'templates', 'parts', 'body.sort')
+	expect(normalizeTemplatePath(path, win32.sep)).toBe('example/templates/parts/body.sort')
+	const posixPath = String.raw`example/templates/parts/body\name.sort`
+	expect(normalizeTemplatePath(posixPath, posix.sep)).toBe(posixPath)
 })
 
 test('hadley: an external directory is compared with an explicit reference compiler without recording sources', async () => {

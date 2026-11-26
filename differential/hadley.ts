@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import galley, { type CompileOptions } from '../index.js'
 import corpus from './HADLEY-TEMPLATES.json' with { type: 'json' }
@@ -39,10 +39,14 @@ export const measureHadley = async (collections: readonly Collection[] = corpus.
 	return { entries: entries.size, files: reached.size, compilations }
 }
 
+export const normalizeTemplatePath = (path: string, separator = sep) => path.replaceAll(separator, '/')
+
 /** Read only template files; external collections and their generated code are never recorded. */
 const readCollections = async (root: string): Promise<Collection[]> => {
 	const paths: string[] = []
-	for await (const path of new Bun.Glob('**/templates/**/*.{chase,sort}').scan(root)) paths.push(path)
+	for await (const path of new Bun.Glob('**/templates/**/*.{chase,sort}').scan(root)) {
+		paths.push(normalizeTemplatePath(path))
+	}
 	if (!paths.length) throw new Error(`No template collections in ${root}`)
 	const collections = new Map<string, Collection>()
 	for (const path of paths.sort()) {

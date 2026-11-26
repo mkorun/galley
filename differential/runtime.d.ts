@@ -16,7 +16,10 @@ declare module 'node:fs/promises' {
 	export function rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>
 }
 declare module 'node:os' { export function tmpdir(): string }
-declare module 'node:path' { export function join(...parts: string[]): string }
+declare module 'node:path' {
+	export function join(...parts: string[]): string
+	export const sep: '/' | '\\'
+}
 declare module 'node:url' {
 	export function fileURLToPath(url: string | URL): string
 	export function pathToFileURL(path: string): URL
