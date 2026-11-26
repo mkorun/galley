@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Diagnostic, Expression, TemplateNode } from '../compiler/index.js'
 
-export const NUMBERS = ['7', '0', '0.5', '007', '-01', '9007199254740991', '9007199254740992', '-9007199254740993', '9007199254740991.1', '-9007199254740991.499', '9007199254740991.0', '1000000000000000000000', '9'.repeat(310)]
+export const NUMBERS = ['7', '0', '0.5', '007', '-01', '00000000000000001', '0009007199254740992', '9007199254740991', '9007199254740992', '-9007199254740993', '9007199254740991.1', '-9007199254740991.499', '9007199254740991.0', '1000000000000000000000', '9'.repeat(310)]
 /** N is the number. The quoted keys are controls: a number in a string is no number. */
 export const EXPRESSIONS = ['N', 'a[N]', 'a[ N ]', 'a.b[N].c', 'b[a[N]]', 'a[N]()', 'a[N] === foo-bar', 'foo-bar === a[N]', 'n === N', 'N === n', 'n === N || f()', 'a[N] === f()', '!a[N]', '(a[N])', 'a[N] ?? N', 'a[N] | upper', 'n | oneOf(N)', 'n | oneOf(a[N])', 'n | oneOf(N, )', 'n | oneOf(N) | 1x', 'a[N] | nofilter', 'user-name[N]', '$.a[N]', 'a[N]b', "a['N']", "a['[N]']"]
 /** E is the expression; a partial form writes it in the partial, and {@js} forms enable code. */
@@ -53,7 +53,7 @@ export const corpus = (): Case[] => {
 }
 export const corpusDigest = (cases: readonly Case[]): string => new Bun.CryptoHasher('sha256').update(JSON.stringify(cases)).digest('hex')
 
-const digest = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 10)
+const digest = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex').slice(0, 8)
 const place = (diagnostic: Diagnostic): Place => [diagnostic.code, diagnostic.severity, digest(JSON.stringify([diagnostic.message, diagnostic.help ?? null])), diagnostic.span.source.id, diagnostic.span.start, diagnostic.span.end]
 const options = (item: Case): Options => ({ strictBraces: item.strictBraces, allowCode: item.allowCode, ...(item.partial === null ? {} : { includes: { import: async () => item.partial! } }) })
 
@@ -113,7 +113,8 @@ export const record = async (compiler: Compiler, cases: readonly Case[]): Promis
 
 /** The new rule, written independently of the compiler: a leading zero, or a magnitude above the bound as written. */
 const breaksNewRule = (code: string, number: string): boolean => {
-	if (code === 'G1106') return /^-?0\d/.test(number)
+	// A leading-zero spelling is G1106 whatever its magnitude; past this, the integer part has no leading zero to count.
+	if (/^-?0\d/.test(number)) return code === 'G1106'
 	const [integer = '', fraction = ''] = number.replace('-', '').split('.')
 	const bound = String(Number.MAX_SAFE_INTEGER)
 	return code === 'G1107' && (integer.length > bound.length || (integer.length === bound.length && (integer > bound || (integer === bound && /[^0]/.test(fraction)))))
@@ -155,20 +156,22 @@ type Row = [Result['output'], Result['error'], Result['lint'], Recorded['numbers
 export const main = async (args: readonly string[], file: URL, cases = corpus()): Promise<boolean> => {
 	if (args.length === 2 && args[0] === '--record') {
 		const recorded = await record(await import(pathToFileURL(join(args[1]!, 'index.ts')).href) as Compiler, cases)
-		// Distinct rows (output, error, lint, numbers) once each; every case names its row.
+		// Distinct rows (output, error, lint, numbers) once each; every case names its row as the step from the previous case's row.
 		const rows: string[] = [], index = new Map<string, number>()
 		const cased = recorded.results.map(result => {
 			const row = JSON.stringify([result.output, result.error, result.lint, result.numbers])
 			if (!index.has(row)) { index.set(row, rows.length); rows.push(row) }
 			return index.get(row)!
 		})
-		await Bun.write(file, `{"corpus":${JSON.stringify(recorded.corpus)},"cases":${JSON.stringify(cased)},"rows":[\n${rows.join(',\n')}\n]}\n`)
+		const steps = cased.map((row, index) => row - (cased[index - 1] ?? 0))
+		await Bun.write(file, `{"corpus":${JSON.stringify(recorded.corpus)},"steps":${JSON.stringify(steps)},"rows":[\n${rows.join(',\n')}\n]}\n`)
 		console.log(`Recorded ${recorded.results.length} cases in ${rows.length} distinct rows`)
 		return true
 	}
 	if (args.length) throw new Error('usage: bun differential/numbers-run.ts [--record <directory with 0.5.0 sources>]')
-	const { corpus: digestOfCorpus, cases: cased, rows } = JSON.parse(await Bun.file(file).text()) as { corpus: string; cases: number[]; rows: Row[] }
-	const results = cased.map(row => { const [output, error, lint, numbers] = rows[row]!; return { output, error, lint, numbers } })
+	const { corpus: digestOfCorpus, steps, rows } = JSON.parse(await Bun.file(file).text()) as { corpus: string; steps: number[]; rows: Row[] }
+	let row = 0
+	const results = steps.map(step => { row += step; const [output, error, lint, numbers] = rows[row]!; return { output, error, lint, numbers } })
 	const report = await compare(await import('../index.js') as Compiler, { corpus: digestOfCorpus, results }, cases)
 	console.log(JSON.stringify(report, null, 2))
 	return !unexpected(report.classes)

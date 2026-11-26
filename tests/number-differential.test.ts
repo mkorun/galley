@@ -16,9 +16,9 @@ test('against recorded 0.5.0, numbers differ only by the new refusals, in tags 0
 	expect(result.exitCode).toBe(0)
 	const report = JSON.parse(new TextDecoder().decode(result.stdout))
 	expect(report.classes).toEqual({
-		same: 31472,
-		'new refusal G1106 (number in brackets)': 768,
-		'new refusal G1106 (number in brackets) in lint, beside the error galley keeps': 48,
+		same: 36064,
+		'new refusal G1106 (number in brackets)': 1536,
+		'new refusal G1106 (number in brackets) in lint, beside the error galley keeps': 96,
 		'new refusal G1107': 2704,
 		'new refusal G1107 in lint, beside the error galley keeps': 160,
 	})
@@ -32,8 +32,8 @@ test('against recorded 0.5.0, numbers differ only by the new refusals, in tags 0
 }, 70000)
 
 const recordedCase = async (index: number): Promise<Recorded> => {
-	const { cases, rows } = JSON.parse(await Bun.file(recorded).text()) as { cases: number[]; rows: [Recorded['output'], Recorded['error'], Recorded['lint'], Recorded['numbers']][] }
-	const [output, error, lint, numbers] = rows[cases[index]!]!
+	const { steps, rows } = JSON.parse(await Bun.file(recorded).text()) as { steps: number[]; rows: [Recorded['output'], Recorded['error'], Recorded['lint'], Recorded['numbers']][] }
+	const [output, error, lint, numbers] = rows[steps.slice(0, index + 1).reduce((row, step) => row + step, 0)]!
 	return { output, error, lint, numbers }
 }
 const find = (source: string, strictBraces = false): number => {
@@ -43,7 +43,7 @@ const find = (source: string, strictBraces = false): number => {
 }
 
 test('the review cases are in the corpus and stay as 0.5.0 left them', async () => {
-	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>', '<p>{ n === 007 || f() }</p>', '<p>{ 9007199254740992 }{@js}return (;{@js}</p>', "<p>{ a['9007199254740992'] }</p>", "<p>{ a['[007]'] }</p>"]) {
+	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>', '<p>{ n === 007 || f() }</p>', '<p>{ 9007199254740992 }{@js}return (;{@js}</p>', "<p>{ a['9007199254740992'] }</p>", "<p>{ a['[007]'] }</p>", '<p>{ 00000000000000001 }</p>']) {
 		for (const strictBraces of [false, true]) {
 			const index = find(source, strictBraces)
 			expect(classify(corpus()[index]!, await recordedCase(index), await run(compiler, corpus()[index]!))).toBe('same')
@@ -78,7 +78,7 @@ test('the comparison records, reads back and rejects another corpus or a usage i
 		expect(await main([], file, cases)).toBe(true)
 		await expect(main([], recorded, cases)).rejects.toThrow('another corpus')
 		const changed = JSON.parse(await Bun.file(file).text())
-		changed.rows[changed.cases[0]][0] = 'changed'
+		changed.rows[changed.steps[0]][0] = 'changed'
 		await Bun.write(file, JSON.stringify(changed))
 		expect(await main([], file, cases)).toBe(false)
 
@@ -109,6 +109,13 @@ test('the classes name every way a result can leave 0.5.0', () => {
 	expect(classify(bracket, { ...compiled, numbers: [['bracket', '<template>', zero, zero + 3]] }, refused('G1106', zero, zero + 3))).toBe('new refusal G1106 (number in brackets)')
 	// A literal's G1106 is 0.5.0's own: a new one there has no number in brackets to stand on.
 	expect(classify({ ...item, source: '<p>{ 007 }</p>' }, { ...compiled, numbers: [['literal', '<template>', 5, 8]] }, refused('G1106', 5, 8))).toBe('unexpected: G1106 on no number in brackets of 0.5.0\'s parse')
+	// A leading-zero spelling is G1106 whatever its magnitude: a G1107 on it is no allowed refusal.
+	for (const written of ['00000000000000001', '0009007199254740992']) {
+		const zeros = { ...item, source: `<p>{ a[${written}] }</p>` }, from = zeros.source.indexOf(written), to = from + written.length
+		const tokens: Recorded = { ...compiled, numbers: [['bracket', '<template>', from, to]] }
+		expect(classify(zeros, tokens, refused('G1107', from, to))).toBe('unexpected: G1107 for a number the new rule allows')
+		expect(classify(zeros, tokens, refused('G1106', from, to))).toBe('new refusal G1106 (number in brackets)')
+	}
 	// In a partial, the place names the partial's file.
 	const inPartial = { ...item, source: '{@partial p.sort}', partial: '{ a[9007199254740992] }' }, partialAt = inPartial.partial.indexOf('9007')
 	const partialRefusal = { output: null, error: ['G1107', 'error', 'm', './p.sort', partialAt, partialAt + 16] as Place, lint: [['G1107', 'error', 'm', './p.sort', partialAt, partialAt + 16] as Place] }
@@ -123,7 +130,7 @@ test('the classes name every way a result can leave 0.5.0', () => {
 test('a render that throws is a result, and a fault outside the compiler stops the comparison', async () => {
 	const item = { source: '<p>{ n }</p>', partial: null, strictBraces: false, allowCode: false }
 	const throwing = { ...compiler, default: async () => ({ render: () => { throw new Error('render') } }) } as Compiler
-	expect((await run(throwing, item)).output).toHaveLength(10)
+	expect((await run(throwing, item)).output).toHaveLength(8)
 	const uncompiled = { ...compiler, default: async () => { throw new SyntaxError('generated') } } as Compiler
 	expect((await run(uncompiled, item)).error?.slice(0, 2)).toEqual(['SyntaxError', 'thrown'])
 	const broken = { ...compiler, default: async () => { throw new TypeError('broken') } } as Compiler
