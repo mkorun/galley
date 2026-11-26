@@ -1,10 +1,14 @@
 import { fail, span } from './diagnostics.js';
 const isStart = (code) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || code === 36;
 const isSpecial = (code) => isStart(code) || (code >= 48 && code <= 57) || code === 58 || code === 43 || code === 45;
-/** A number the template writes, in brackets or as a literal: without a leading zero, and within Number.MAX_SAFE_INTEGER as written. */
-export const checkNumber = (raw, at) => {
+/** A numeric literal meets this check where 0.5.0 parsed it; a number in brackets meets it in checkNumber. */
+export const checkLeadingZero = (raw, at) => {
     if (/^-?0\d/.test(raw))
         fail('G1106', `Number ${raw} has a leading zero`, at, `Write ${raw.replace(/^(-?)0+(\d)/, '$1$2')} without leading zeros.`);
+};
+/** A number the template writes, in brackets or as a literal: without a leading zero, and within Number.MAX_SAFE_INTEGER as written. */
+export const checkNumber = (raw, at) => {
+    checkLeadingZero(raw, at);
     // Decide on the spelling: Number() already rounds 9007199254740991.1 down to the bound.
     const [integer = '', fraction = ''] = raw.replace('-', '').split('.');
     const limit = BigInt(Number.MAX_SAFE_INTEGER);

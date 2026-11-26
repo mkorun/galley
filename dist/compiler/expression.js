@@ -1,5 +1,5 @@
 import { fail, span } from './diagnostics.js';
-import { checkNumber, checkPath, parsePath } from './path.js';
+import { checkLeadingZero, checkNumber, checkPath, parsePath } from './path.js';
 const PRECEDENCE = { '??': 1, '||': 2, '&&': 3, '===': 4, '!==': 4, '>': 4, '<': 4, '>=': 4, '<=': 4 };
 const ORDERED_OPERATORS = ['===', '!==', '>=', '<=', '??', '||', '&&', '>', '<'];
 const splitTopLevel = (raw, separator) => {
@@ -49,8 +49,10 @@ const literal = (raw, at) => {
             fail('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.');
         return { kind: 'literal', value: body, raw, span: at };
     }
-    if (/^-?\d+(?:\.\d+)?$/.test(raw))
+    if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+        checkLeadingZero(raw, at);
         return { kind: 'literal', value: Number(raw), raw, span: at };
+    }
     if (raw === 'true' || raw === 'false')
         return { kind: 'literal', value: raw === 'true', raw, span: at };
     if (raw === 'null')

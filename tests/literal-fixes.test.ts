@@ -139,3 +139,16 @@ test('a brace that is no galley expression stays text whatever numbers it holds,
 		expect((await lint(source!))[0]).toEqual(error.diagnostic)
 	}
 })
+
+test('a leading-zero literal is G1106 where 0.5.0 parsed it, even in a tag that parses no further', async () => {
+	for (const source of ['<p>{ n === 007 || f() }</p>', '<p>{ n | oneOf(007, ) }</p>', '<p>{ n | oneOf(007) | 1x }</p>', '<script>if (true) { n === 007 || f() }</script>']) {
+		for (const strictBraces of [false, true]) {
+			const error = await galley(source, { strictBraces }).catch(error => error)
+			expect(error).toBeInstanceOf(GalleyDiagnosticError)
+			expect(error.diagnostic.code).toBe('G1106')
+			expect(error.diagnostic.span.start).toBe(source.indexOf('007'))
+			expect(error.diagnostic.span.end).toBe(source.indexOf('007') + 3)
+			expect(await lint(source, { strictBraces })).toEqual([error.diagnostic])
+		}
+	}
+})

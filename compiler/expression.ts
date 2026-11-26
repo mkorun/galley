@@ -1,6 +1,6 @@
 import type { BinaryExpression, Expression, LiteralExpression, PipeCall, PipeExpression, UnaryExpression } from './ast.js'
 import { fail, span } from './diagnostics.js'
-import { checkNumber, checkPath, parsePath } from './path.js'
+import { checkLeadingZero, checkNumber, checkPath, parsePath } from './path.js'
 import type { SourceSpan } from './types.js'
 
 type Operator = BinaryExpression['operator']
@@ -36,7 +36,10 @@ const literal = (raw: string, at: SourceSpan): LiteralExpression | null => {
 		if (/[\n\r\u2028\u2029]/.test(body)) fail('G1105', 'String literals may not contain line breaks', at, 'Keep the literal on one line or provide the value through template data.')
 		return { kind: 'literal', value: body, raw, span: at }
 	}
-	if (/^-?\d+(?:\.\d+)?$/.test(raw)) return { kind: 'literal', value: Number(raw), raw, span: at }
+	if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+		checkLeadingZero(raw, at)
+		return { kind: 'literal', value: Number(raw), raw, span: at }
+	}
 	if (raw === 'true' || raw === 'false') return { kind: 'literal', value: raw === 'true', raw, span: at }
 	if (raw === 'null') return { kind: 'literal', value: null, raw, span: at }
 	if (raw === 'undefined') return { kind: 'literal', value: undefined, raw, span: at }
