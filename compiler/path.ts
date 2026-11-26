@@ -22,16 +22,10 @@ export const checkNumber = (raw: string, at: SourceSpan): void => {
 	if (BigInt(integer) > limit || (BigInt(integer) === limit && /[^0]/.test(fraction))) fail('G1107', `Number ${raw} exceeds the largest safe integer, ${Number.MAX_SAFE_INTEGER}, in magnitude`, at, 'Write it as a quoted string, or pass it in template data.')
 }
 
-/** Number diagnostics come from a complete expression: they stand where a malformed one would become literal text or another diagnostic. */
-export const isNumberDiagnostic = (code: string): boolean => code === 'G1106' || code === 'G1107'
-
-/** First path names and numbers are checked after parsing the complete expression, so an otherwise malformed brace stays literal under ADR-015. */
-export const checkPath = (path: PathExpression): void => {
+/** Check after parsing the complete expression, so an otherwise malformed brace stays literal under ADR-015. */
+export const checkPathRoots = (path: PathExpression): void => {
 	if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(path.root)) fail('G1007', `The first path name must be an identifier: ${JSON.stringify(path.root)}`, path.span, `Use $.${path.root} to reach that data key.`)
-	for (const segment of path.segments) {
-		if (typeof segment.value === 'object') checkPath(segment.value)
-		else if (segment.number) checkNumber(segment.number.raw, segment.number.span)
-	}
+	for (const segment of path.segments) if (typeof segment.value === 'object') checkPathRoots(segment.value)
 }
 
 export const parsePath = (raw: string, at: SourceSpan): PathExpression => {

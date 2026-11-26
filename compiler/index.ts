@@ -1,5 +1,5 @@
 import type { TemplateAst, TemplateNode } from './ast.js'
-import { analyze, contains, scriptedSnippets } from './analysis.js'
+import { analyze, checkTemplateNumbers, contains, scriptedSnippets } from './analysis.js'
 import { readContexts } from './context.js'
 import { UrlPrefix } from './url.js'
 import { stringify, filterWithWarnings, undefinedError } from './stringify.js'
@@ -69,6 +69,7 @@ export async function lint(template: string, options: CompileOptions = {}): Prom
 		if (!diagnostics.some(item => item.severity === 'error')) {
 			const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
 			readContexts(prepared, options.strictBraces, scripted)
+			checkTemplateNumbers(ast.children)
 		}
 	} catch (error) {
 		if (!(error instanceof GalleyDiagnosticError)) throw error
@@ -91,7 +92,9 @@ export default async function galley<
 	const fatal = diagnostics.find(diagnostic => diagnostic.severity === 'error')
 	if (fatal) throw new GalleyDiagnosticError(fatal)
 	const prepared = options.strip ? { ...ast, children: stripStatic(ast.children, true) } : ast
-	const program = generate(readContexts(prepared, options.strictBraces, scripted), options, allowCode)
+	const read = readContexts(prepared, options.strictBraces, scripted)
+	checkTemplateNumbers(ast.children)
+	const program = generate(read, options, allowCode)
 	if (program.async) {
 		const render = new Function('$$html', '$$UrlPrefix', '$$stringify', '$$filterWithWarnings', '$$filters', '$$places', '$$undefinedError', `return async function($){${program.body}}`)(HTML, UrlPrefix, stringify, filterWithWarnings, filters, program.places, undefinedError) as (data: Data) => Promise<string>
 		return { async: true, diagnostics, render, ...(options.debug ? { source: program.body } : {}) }

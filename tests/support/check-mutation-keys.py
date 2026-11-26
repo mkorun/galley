@@ -29,10 +29,11 @@ for file, statements in {
     'util.ts': ['candidate === value', 'pluralRules.size < 100', 'pluralRules.set(locale, rules)'],
     'compiler/filters.ts': ["'knownFilters' in options", "typeof filter !== 'function'", 'Object.create(null)', 'Object.freeze(filters)'],
     'compiler/stringify.ts': ['warnOnFailure = previous', 'new Error(`G5002:'],
-    'compiler/analysis.ts': ["contains(nodes, 'js')", 'collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)'],
-    'compiler/expression.ts': ['checkNumber(expression.raw, expression.span)', 'raw.length > 1', 'trimSpan(rawInput, atInput)', 'literal(raw, at)', 'checkExpression(expression.left)', 'checkExpression(expression.input)', 'splitTopLevel(raw, operator).length > 0'],
-    'compiler/path.ts': ['checkPath(segment.value)', 'checkNumber(segment.number.raw', "fail('G1106'", "fail('G1107'"],
-    'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPath(collection)', 'checkExpression(argument)', 'seen.add(param)'],
+    'compiler/analysis.ts': ["contains(nodes, 'js')", 'collectExpressionMetadata(node.collection, metadata)', 'collectExpressionMetadata(expression.operand, used)', 'checkNumbers(node.collection)', 'checkTemplateNumbers(node.fallback'],
+    'compiler/expression.ts': ['checkLeadingZero(raw, at)', 'raw.length > 1', 'trimSpan(rawInput, atInput)', 'literal(raw, at)', 'checkRoots(expression.left)', 'checkRoots(expression.input)', 'splitTopLevel(raw, operator).length > 0', 'checkNumber(segment.number.raw', 'checkNumber(expression.raw, expression.span)'],
+    'compiler/path.ts': ['checkPathRoots(segment.value)', "fail('G1106'", "fail('G1107'", 'checkLeadingZero(raw, at)'],
+    'compiler/parser.ts': ["braces.set(token.span.start", "continuations === 'if'", 'fallback: fallback.children', 'checkPathRoots(collection)', 'checkRoots(argument)', 'seen.add(param)'],
+    'compiler/index.ts': ['checkTemplateNumbers(ast.children)'],
 }.items():
     for statement in statements:
         assert any(m['file'] == file and statement in m['before'] for m in original), statement

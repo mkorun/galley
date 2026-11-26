@@ -59,7 +59,8 @@ const numberError = async (source: string, number: string, code: string, help: s
 	expect(error.diagnostic.span.start).toBe(source.indexOf(number))
 	expect(error.diagnostic.span.end).toBe(source.indexOf(number) + number.length)
 	expect(error.diagnostic.help).toBe(help)
-	expect((await lint(source))[0]).toEqual(error.diagnostic)
+	// Lint keeps the findings of 0.5.0, such as G3002 for raw output, beside the number's error.
+	expect((await lint(source)).filter(diagnostic => diagnostic.severity === 'error')).toEqual([error.diagnostic])
 	return error.diagnostic.message as string
 }
 const placements = (path: string) => [`{ ${path} }`, `{@raw ${path}}`, `{@const x = ${path}}`, `{#if ${path}}y{/if}`, `{#each ${path} as x}{/each}`, `{#snippet s(x)}{ x }{/snippet}{@render s(${path})}`]
@@ -90,11 +91,14 @@ test('G1107: a number beyond Number.MAX_SAFE_INTEGER is refused in brackets and 
 	for (const number of rounded) {
 		for (const source of [`{@raw ${number}}`, `{@const n = ${number}}{ n }`, `{ n | oneOf(${number}) }`, `{#snippet s(x)}{ x }{/snippet}{@render s(${number})}`]) await numberError(source, number, 'G1107', help)
 		const includes = { import: () => Promise.resolve(`{@raw ${number}}`) }
-		for (const result of [await galley('{@partial p.sort}', { includes }).catch(error => error.diagnostic), (await lint('{@partial p.sort}', { includes }))[0]]) {
+		for (const result of [await galley('{@partial p.sort}', { includes }).catch(error => error.diagnostic), (await lint('{@partial p.sort}', { includes })).at(-1)]) {
 			expect(result.code).toBe('G1107')
 			expect(result.span.source.text.slice(result.span.start, result.span.end)).toBe(number)
 		}
 	}
+	// Wherever the number stands in a template 0.5.0 compiled, unused snippets included.
+	const key = 'a[9007199254740992]'
+	for (const source of [`{#if p}{ ${key} }{/if}`, `{#if p}x{:else}{ ${key} }{/if}`, `{#each l as i}{ ${key} }{/each}`, `{#each l as i}x{:else}{ ${key} }{/each}`, `{#snippet s()}{ ${key} }{/snippet}`, `{#if !${key}}y{/if}`, `{ ${key} === n }`, `{ ${key} | upper }`]) await numberError(source, '9007199254740992', 'G1107', help)
 	// 0.5.0 wrote Infinity as an identifier that a constant could shadow.
 	await numberError(`{@const Infinity = 'x'}{ a[${nines}] }`, nines, 'G1107', help)
 })
@@ -151,4 +155,28 @@ test('a leading-zero literal is G1106 where 0.5.0 parsed it, even in a tag that 
 			expect(await lint(source, { strictBraces })).toEqual([error.diagnostic])
 		}
 	}
+})
+
+test('the checks 0.6.0 added for numbers run last, on a template that passes every check of 0.5.0', async () => {
+	// The review's case: 0.5.0 leaves the brace as script text, since foo-bar is no galley root.
+	for (const number of ['9007199254740992', '007']) {
+		const source = `<script>if (true) { a[${number}] === foo-bar }</script>`
+		for (const strictBraces of [false, true]) {
+			expect(await lint(source, { strictBraces })).toEqual([])
+			expect((await galley(source, { strictBraces })).render({})).toBe(source)
+		}
+	}
+	// Each of these stopped in 0.5.0 for another reason, at the same place.
+	for (const [source, code, start, end] of [['<p>{ a[007] === foo-bar }</p>', 'G3019', 3, 4], ['<script>{ a[007] }</script>', 'G3018', 8, 18], ['<p>{ a[007] | nofilter }</p>', 'G3001', 14, 22], ['<p>{ user-name[9007199254740992] }</p>', 'G3019', 3, 4]] as const) {
+		for (const strictBraces of [false, true]) {
+			const error = await galley(source, { strictBraces }).catch(error => error)
+			expect(error).toBeInstanceOf(GalleyDiagnosticError)
+			expect([error.diagnostic.code, error.diagnostic.span.start, error.diagnostic.span.end]).toEqual([code, start, end])
+			expect((await lint(source, { strictBraces })).map(diagnostic => diagnostic.code)).toEqual([code])
+		}
+	}
+	// A template 0.5.0 compiled keeps its lint findings; the new refusal follows them.
+	const raw = '<p>{@raw a[9007199254740992]}</p>'
+	expect((await lint(raw)).map(diagnostic => diagnostic.code)).toEqual(['G3002', 'G1107'])
+	await expect(galley(raw)).rejects.toThrow('G1107')
 })

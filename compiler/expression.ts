@@ -1,6 +1,6 @@
 import type { BinaryExpression, Expression, LiteralExpression, PipeCall, PipeExpression, UnaryExpression } from './ast.js'
 import { fail, span } from './diagnostics.js'
-import { checkLeadingZero, checkNumber, checkPath, parsePath } from './path.js'
+import { checkLeadingZero, checkNumber, checkPathRoots, parsePath } from './path.js'
 import type { SourceSpan } from './types.js'
 
 type Operator = BinaryExpression['operator']
@@ -147,20 +147,32 @@ const parsePiped = (rawInput: string, atInput: SourceSpan): Expression => {
 	return node
 }
 
-/** The checks that wait for the complete expression: first path names and numbers. */
-export const checkExpression = (expression: Expression): void => {
-	if (expression.kind === 'path') checkPath(expression)
-	else if (expression.kind === 'literal') { if (typeof expression.value === 'number') checkNumber(expression.raw, expression.span) }
-	else if (expression.kind === 'unary') checkExpression(expression.operand)
-	else if (expression.kind === 'binary') { checkExpression(expression.left); checkExpression(expression.right) }
+export const checkRoots = (expression: Expression): void => {
+	if (expression.kind === 'path') checkPathRoots(expression)
+	else if (expression.kind === 'unary') checkRoots(expression.operand)
+	else if (expression.kind === 'binary') { checkRoots(expression.left); checkRoots(expression.right) }
 	else if (expression.kind === 'pipe') {
-		checkExpression(expression.input)
-		for (const pipe of expression.pipes) for (const argument of pipe.args) checkExpression(argument)
+		checkRoots(expression.input)
+		for (const pipe of expression.pipes) for (const argument of pipe.args) checkRoots(argument)
+	}
+}
+
+/** The number checks 0.6.0 added: a leading zero in brackets and a magnitude beyond Number.MAX_SAFE_INTEGER. */
+export const checkNumbers = (expression: Expression): void => {
+	if (expression.kind === 'path') {
+		// A bracket holds no bracket (its scanner stops at the first ]), so only this path's own keys hold numbers.
+		for (const segment of expression.segments) if (segment.number) checkNumber(segment.number.raw, segment.number.span)
+	} else if (expression.kind === 'literal') { if (typeof expression.value === 'number') checkNumber(expression.raw, expression.span) }
+	else if (expression.kind === 'unary') checkNumbers(expression.operand)
+	else if (expression.kind === 'binary') { checkNumbers(expression.left); checkNumbers(expression.right) }
+	else if (expression.kind === 'pipe') {
+		checkNumbers(expression.input)
+		for (const pipe of expression.pipes) for (const argument of pipe.args) checkNumbers(argument)
 	}
 }
 
 export const parseExpression = (raw: string, at: SourceSpan): Expression => {
 	const expression = parsePiped(raw, at)
-	checkExpression(expression)
+	checkRoots(expression)
 	return expression
 }

@@ -11,7 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and is now G1106, suggesting `7`. A number beyond `Number.MAX_SAFE_INTEGER` in magnitude, in brackets or as a
   literal, read a different number (`a[9007199254740993]` read key `9007199254740992`, 310 nines read `Infinity`,
   `9007199254740991.1` read `9007199254740991`) and is now G1107, decided on the number as written; quote such a
-  key, as in `a['9007199254740993']`, or pass the number in data.
+  key, as in `a['9007199254740993']`, or pass the number in data. Both are checked after every check of 0.5.0: a
+  template that 0.5.0 refused keeps its diagnostic, and a brace that 0.5.0 kept as text stays text.
 - `stripEmptyMeta` treats a `{@render}` in `<meta content>` or `<link href>` as the snippet's body written in place:
   only outputs that run in the snippet mark the tag, the call itself no longer does. A static tag filled by a
   snippet that writes nothing dynamic, or whose output sits in an untaken branch, was removed and is now kept:

@@ -1,4 +1,5 @@
 import type { SourceSpan } from './types.js'
+import { checkNumbers } from './expression.js'
 import { LOOP_METADATA } from './ast.js'
 import type { LoopMetadata, Expression, IfBranch, SnippetNode, TemplateAst, TemplateNode } from './ast.js'
 
@@ -108,4 +109,18 @@ export const analyze = (ast: TemplateAst): TemplateAst => {
 	}
 	const children = annotate(ast.children)
 	return children === ast.children ? ast : { ...ast, children }
+}
+
+/**
+ * The number checks 0.6.0 added run last, on a template that passed every check of 0.5.0: so 0.6.0 refuses more only
+ * in templates 0.5.0 compiled, and a brace that 0.5.0 kept as text stays text.
+ */
+export const checkTemplateNumbers = (nodes: readonly TemplateNode[]): void => {
+	for (const node of nodes) {
+		if (node.kind === 'output' || node.kind === 'const') checkNumbers(node.expression)
+		else if (node.kind === 'render') node.arguments.forEach(checkNumbers)
+		else if (node.kind === 'if') for (const branch of node.branches) { if (branch.condition) checkNumbers(branch.condition); checkTemplateNumbers(branch.children) }
+		else if (node.kind === 'each') { checkNumbers(node.collection); checkTemplateNumbers(node.children); checkTemplateNumbers(node.fallback ?? []) }
+		else if (node.kind === 'snippet' || node.kind === 'partial') checkTemplateNumbers(node.children ?? [])
+	}
 }
