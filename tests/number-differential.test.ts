@@ -15,20 +15,58 @@ test('against recorded 0.5.0, numbers differ only by the new refusals, in tags 0
 	expect(new TextDecoder().decode(result.stderr)).toBe('')
 	expect(result.exitCode).toBe(0)
 	const report = JSON.parse(new TextDecoder().decode(result.stdout))
-	expect(report.classes).toEqual({ same: 13456, 'new refusal G1106 (number in brackets)': 328, 'new refusal G1107': 1192 })
-	expect(report.examples).toEqual({ same: '"<p>{ 7 }</p>" strictBraces=false', 'new refusal G1106 (number in brackets)': '"<p>{ a[007] }</p>" strictBraces=false', 'new refusal G1107': '"<p>{@raw 9007199254740992}</p>" strictBraces=false' })
+	expect(report.classes).toEqual({
+		same: 31472,
+		'new refusal G1106 (number in brackets)': 768,
+		'new refusal G1106 (number in brackets) in lint, beside the error galley keeps': 48,
+		'new refusal G1107': 2704,
+		'new refusal G1107 in lint, beside the error galley keeps': 160,
+	})
+	expect(report.examples).toEqual({
+		same: '"<p>{ 7 }</p>" strictBraces=false',
+		'new refusal G1106 (number in brackets)': '"<p>{ a[007] }</p>" strictBraces=false',
+		'new refusal G1106 (number in brackets) in lint, beside the error galley keeps': '"<p>{ a[007] }{@js}return (;{@js}</p>" strictBraces=false allowCode',
+		'new refusal G1107': '"<p>{@raw 9007199254740992}</p>" strictBraces=false',
+		'new refusal G1107 in lint, beside the error galley keeps': '"<p>{ a[9007199254740992] }{@js}return (;{@js}</p>" strictBraces=false allowCode',
+	})
 }, 70000)
 
+const recordedCase = async (index: number): Promise<Recorded> => {
+	const { cases, rows } = JSON.parse(await Bun.file(recorded).text()) as { cases: number[]; rows: [Recorded['output'], Recorded['error'], Recorded['lint'], Recorded['numbers']][] }
+	const [output, error, lint, numbers] = rows[cases[index]!]!
+	return { output, error, lint, numbers }
+}
+const find = (source: string, strictBraces = false): number => {
+	const index = corpus().findIndex(item => item.source === source && item.strictBraces === strictBraces)
+	expect(index).toBeGreaterThanOrEqual(0)
+	return index
+}
+
 test('the review cases are in the corpus and stay as 0.5.0 left them', async () => {
-	const { rows } = JSON.parse(await Bun.file(recorded).text()) as { rows: [string | null, never, never[], [number, number][]][] }
-	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>', '<p>{ n === 007 || f() }</p>']) {
+	for (const source of ['<script>if (true) { a[9007199254740992] === foo-bar }</script>', '<script>if (true) { a[007] === foo-bar }</script>', '<p>{ n === 007 || f() }</p>', '<p>{ 9007199254740992 }{@js}return (;{@js}</p>', "<p>{ a['9007199254740992'] }</p>", "<p>{ a['[007]'] }</p>"]) {
 		for (const strictBraces of [false, true]) {
-			const index = corpus().findIndex(item => item.source === source && item.strictBraces === strictBraces)
-			expect(index).toBeGreaterThanOrEqual(0)
-			const [output, error, lint, expressions] = rows[index]!
-			expect(classify(corpus()[index]!, { output, error, lint, expressions }, await run(compiler, corpus()[index]!))).toBe('same')
+			const index = find(source, strictBraces)
+			expect(classify(corpus()[index]!, await recordedCase(index), await run(compiler, corpus()[index]!))).toBe('same')
 		}
 	}
+})
+
+test('planted faults: a refusal on a quoted key and a changed help text are caught', async () => {
+	// The compiler refusing the number inside a quoted key, at that number's place.
+	for (const source of ["<p>{ a['9007199254740992'] }</p>", "<p>{ a['[007]'] }</p>"]) {
+		const index = find(source), item = corpus()[index]!, at = source.search(/\d/), length = source.includes('[007]') ? 3 : 16
+		const code = length === 3 ? 'G1106' : 'G1107'
+		const refusal = [code, 'error', 'digest', '<template>', at, at + length] as const
+		const after = { output: null, error: [...refusal] as never, lint: [[...refusal]] as never }
+		expect(classify(item, await recordedCase(index), after)).toBe(`unexpected: ${code} on no ${code === 'G1106' ? 'number in brackets' : 'number'} of 0.5.0's parse`)
+	}
+	// The same diagnostic with another help text.
+	const index = find('<p>{ user-name[7] }</p>'), item = corpus()[index]!
+	const changed = { ...compiler, default: (source: string, options: never) => compiler.default(source, options).catch(error => { throw new compiler.GalleyDiagnosticError({ ...error.diagnostic, help: 'other help' } as never) }) } as Compiler
+	const before = await recordedCase(index)
+	expect(before.error?.[0]).toBe('G3019')
+	expect(classify(item, before, await run(compiler, item))).toBe('same')
+	expect(classify(item, before, await run(changed, item))).toBe('unexpected: 0.5.0 result changed')
 })
 
 test('the comparison records, reads back and rejects another corpus or a usage it does not know', async () => {
@@ -40,7 +78,7 @@ test('the comparison records, reads back and rejects another corpus or a usage i
 		expect(await main([], file, cases)).toBe(true)
 		await expect(main([], recorded, cases)).rejects.toThrow('another corpus')
 		const changed = JSON.parse(await Bun.file(file).text())
-		changed.rows[0][0] = 'changed'
+		changed.rows[changed.cases[0]][0] = 'changed'
 		await Bun.write(file, JSON.stringify(changed))
 		expect(await main([], file, cases)).toBe(false)
 
@@ -54,26 +92,40 @@ test('the comparison records, reads back and rejects another corpus or a usage i
 }, 30000)
 
 test('the classes name every way a result can leave 0.5.0', () => {
-	const source = '<p>{ a[9007199254740992] }</p>', item = { source, strictBraces: false }
+	const source = '<p>{ a[9007199254740992] }</p>', item = { source, partial: null as string | null, strictBraces: false, allowCode: false }
 	const at = source.indexOf('9007'), number = [at, at + 16] as const
-	const compiled: Recorded = { output: 'x', error: null, lint: [], expressions: [[5, 24]] }
-	const refused = (code: string, start: number, end: number) => ({ output: null, error: [code, 'm', start, end] as [string, string, number, number], lint: [[code, 'm', start, end] as [string, string, number, number]] })
+	type Place = [string, string, string, string, number, number]
+	const compiled: Recorded = { output: 'x', error: null, lint: [], numbers: [['bracket', '<template>', ...number]] }
+	const refused = (code: string, start: number, end: number) => ({ output: null, error: [code, 'error', 'm', '<template>', start, end] as Place, lint: [[code, 'error', 'm', '<template>', start, end] as Place] })
 	expect(classify(item, compiled, refused('G1107', ...number))).toBe('new refusal G1107')
-	expect(classify(item, { ...compiled, error: ['G3001', 'm', 0, 1], output: null }, refused('G1107', ...number))).toBe('unexpected: 0.5.0 result changed')
+	expect(classify(item, { ...compiled, error: ['G3001', 'error', 'm', '<template>', 0, 1], output: null }, refused('G1107', ...number))).toBe('unexpected: 0.5.0 result changed')
 	expect(classify(item, compiled, { ...compiled, output: 'y' })).toBe('unexpected: 0.5.0 result changed')
 	expect(classify(item, compiled, refused('G1106', ...number))).toBe('unexpected: G1106 for a number the new rule allows')
-	expect(classify(item, compiled, refused('G1107', 3, 4))).toBe('unexpected: G1107 for a number the new rule allows')
-	expect(classify(item, { ...compiled, expressions: [] }, refused('G1107', ...number))).toBe('unexpected: G1107 outside an expression 0.5.0 compiled')
-	expect(classify(item, { ...compiled, lint: [['G3002', 'm', 3, 4]] }, refused('G1107', ...number))).toBe('unexpected: lint differs beyond G1107')
-	const bracket = { source: '<p>{ a[ 007 ] }</p>', strictBraces: false }, zero = bracket.source.indexOf('007')
-	expect(classify(bracket, compiled, refused('G1106', zero, zero + 3))).toBe('new refusal G1106 (number in brackets)')
-	expect(classify({ source: '<p>{ 007 }</p>', strictBraces: false }, compiled, refused('G1106', 5, 8))).toBe('unexpected: G1106 for a number the new rule allows')
+	expect(classify(item, compiled, refused('G3001', ...number))).toBe('unexpected: G3001 for a number the new rule allows')
+	expect(classify(item, compiled, refused('G1107', 3, 4))).toBe('unexpected: G1107 on no number of 0.5.0\'s parse')
+	expect(classify(item, { ...compiled, numbers: [] }, refused('G1107', ...number))).toBe('unexpected: G1107 on no number of 0.5.0\'s parse')
+	expect(classify(item, { ...compiled, lint: [['G3002', 'info', 'm', '<template>', 3, 4]] }, refused('G1107', ...number))).toBe('unexpected: lint differs beyond G1107')
+	const bracket = { ...item, source: '<p>{ a[ 007 ] }</p>' }, zero = bracket.source.indexOf('007')
+	expect(classify(bracket, { ...compiled, numbers: [['bracket', '<template>', zero, zero + 3]] }, refused('G1106', zero, zero + 3))).toBe('new refusal G1106 (number in brackets)')
+	// A literal's G1106 is 0.5.0's own: a new one there has no number in brackets to stand on.
+	expect(classify({ ...item, source: '<p>{ 007 }</p>' }, { ...compiled, numbers: [['literal', '<template>', 5, 8]] }, refused('G1106', 5, 8))).toBe('unexpected: G1106 on no number in brackets of 0.5.0\'s parse')
+	// In a partial, the place names the partial's file.
+	const inPartial = { ...item, source: '{@partial p.sort}', partial: '{ a[9007199254740992] }' }, partialAt = inPartial.partial.indexOf('9007')
+	const partialRefusal = { output: null, error: ['G1107', 'error', 'm', './p.sort', partialAt, partialAt + 16] as Place, lint: [['G1107', 'error', 'm', './p.sort', partialAt, partialAt + 16] as Place] }
+	expect(classify(inPartial, { ...compiled, numbers: [['bracket', './p.sort', partialAt, partialAt + 16]] }, partialRefusal)).toBe('new refusal G1107')
+	expect(classify(inPartial, { ...compiled, numbers: [['bracket', '<template>', partialAt, partialAt + 16]] }, partialRefusal)).toBe('unexpected: G1107 on no number of 0.5.0\'s parse')
+	// Where galley keeps 0.5.0's thrown error, only lint may add the refusal.
+	const thrown = ['SyntaxError', 'thrown', 'm', '', -1, -1] as Place
+	expect(classify(item, { ...compiled, output: null, error: thrown }, { ...refused('G1107', ...number), error: thrown })).toBe('new refusal G1107 in lint, beside the error galley keeps')
+	expect(classify(item, { ...compiled, output: null, error: thrown, lint: [['G3002', 'info', 'm', '<template>', 3, 4]] }, { output: null, error: thrown, lint: [] })).toBe('unexpected: 0.5.0 lint changed')
 })
 
 test('a render that throws is a result, and a fault outside the compiler stops the comparison', async () => {
-	const item = { source: '<p>{ n }</p>', strictBraces: false }
+	const item = { source: '<p>{ n }</p>', partial: null, strictBraces: false, allowCode: false }
 	const throwing = { ...compiler, default: async () => ({ render: () => { throw new Error('render') } }) } as Compiler
-	expect((await run(throwing, item)).output).toHaveLength(12)
+	expect((await run(throwing, item)).output).toHaveLength(10)
+	const uncompiled = { ...compiler, default: async () => { throw new SyntaxError('generated') } } as Compiler
+	expect((await run(uncompiled, item)).error?.slice(0, 2)).toEqual(['SyntaxError', 'thrown'])
 	const broken = { ...compiler, default: async () => { throw new TypeError('broken') } } as Compiler
 	await expect(run(broken, item)).rejects.toThrow('broken')
 	const unparsable = { ...compiler, parse: () => { throw new TypeError('parse') } } as Compiler

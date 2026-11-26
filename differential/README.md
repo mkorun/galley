@@ -110,16 +110,20 @@ generator and independent `srcset` candidate oracle are pinned with the other st
 decoded marker-bearing list must pass the whole-prefix rule; placement and single-URL checks also apply. The smoke
 test fails if the URL checker no longer restarts at a separator. This command prints results without writing a record.
 
-`bun differential/numbers-run.ts` compares numbers where they meet the literal-brace fallback against 0.5.0: 14,976
-cases from thirteen numbers (leading zeros, the safe-integer bound, decimals at the bound), 24 expression shapes
-(brackets, nested brackets, calls, comparisons, pipes, filter arguments, invalid roots before and after the number),
-eight forms (output, statement-shaped brace, `{@raw}`, `{@const}`, `{#if}`, `{#each}`, filter and snippet arguments),
-text, script and style, with `strictBraces` off and on. Output, error and lint diagnostics are compared by code,
-message digest and place. A case may differ only by a G1106 for a number in brackets or a G1107, where the number
-breaks the new rule as written, inside an expression 0.5.0 parsed, in a template 0.5.0 compiled, with 0.5.0's lint
-findings kept before it. `NUMBERS-0.5.0.json` holds the recorded 0.5.0 results, so a rerun needs no second build;
-`--record <directory>` records them again from a copy of the 0.5.0 sources. The gate runs the full comparison in a
-child process, outside the mutation campaign's shared loop budget, and pins its class counts.
+`bun differential/numbers-run.ts` compares numbers where they meet the literal-brace fallback against 0.5.0: 35,152
+cases from thirteen numbers (leading zeros, the safe-integer bound, decimals at the bound), 26 expression shapes
+(brackets, nested brackets, calls, comparisons, pipes, filter arguments, invalid roots before and after the number,
+quoted keys as controls), thirteen forms (output, statement-shaped brace, `{@raw}`, `{@const}`, `{#if}`, `{#each}` and
+its fallback, filter and snippet arguments, an unused snippet body, a partial, enabled `{@js}` that does and does not
+compile), text, script, style and an attribute, with `strictBraces` off and on. Output, the compile error and lint
+diagnostics are compared by code, severity, a digest of message and help, file and offsets. A case may differ only by
+a G1106 or G1107 that stands on a numeric token of 0.5.0's own parse (a number in brackets for G1106, any numeric
+literal or number in brackets for G1107) and breaks the new rule as written, in a template 0.5.0 compiled, with
+0.5.0's lint findings kept before it. Where galley keeps 0.5.0's error because the generated code does not compile,
+lint, which never compiles it, may add that refusal. `NUMBERS-0.5.0.json` holds the recorded 0.5.0 results as distinct
+rows and one row index per case, so a rerun needs no second build; `--record <directory>` records them again from a
+copy of the 0.5.0 sources (`git archive 2b4d47d`). The gate runs the full comparison in a child process, outside the
+mutation campaign's shared loop budget, and pins its class counts.
 
 `bun differential/rule17-run.ts` runs the rule 17 family: 896 cases across text owners, attributes, inline comments,
 doctypes and text-owner end boundaries, with nine value/brace forms, four call paths (direct, snippet, partial
