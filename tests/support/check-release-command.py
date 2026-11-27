@@ -21,7 +21,7 @@ class ReleaseTests(unittest.TestCase):
         (self.target / 'tests/support').mkdir(parents=True)
         (self.target / 'tests/support/check-release-tree.sh').write_text('exec release-tree\n')
         shutil.copyfile(root / 'check.sh', self.target / 'check.sh')
-        for name in ['bash', 'dirname']:
+        for name in ['bash', 'dirname', 'find']:
             executable = shutil.which(name)
             if executable is None:
                 raise RuntimeError(f'Gate tests require {name} on PATH')
@@ -64,10 +64,13 @@ elif name == os.environ.get('FAIL_TOOL'):
             wrapper.write_bytes(f'#!/bin/sh\nexec {command} "$@"\n'.encode('utf-8'))
             wrapper.chmod(0o755)
         self.environment = os.environ | {'PATH': str(self.target / 'bin')}
+        scan_flags = ['--redact', '--no-banner', '--log-level', 'warn']
         self.ordinary = [
             ['release-tree'], ['python3', 'tests/mutate-context.py', '--list'],
             ['bun', 'run', 'typecheck'], ['bun', 'test', '--coverage'], ['bun', 'run', 'build'],
-            ['git', 'diff', '--exit-code', '--', 'dist'], ['gitleaks', 'git', '.', '--redact', '--no-banner', '--log-level', 'warn'],
+            ['git', 'diff', '--exit-code', '--', 'dist'],
+            ['gitleaks', 'git', '.', *scan_flags],
+            ['gitleaks', 'git', '.', '--pre-commit', '--staged', *scan_flags],
         ]
         self.status = [
             ['git', 'status', '--porcelain', '--untracked-files=all'],
@@ -84,9 +87,28 @@ elif name == os.environ.get('FAIL_TOOL'):
         return result
 
     def test_plain_gate_has_no_campaign_or_cache_lookup(self):
+        for name in ['tests/example.test.ts', 'node_modules/dependency.spec.ts', '.git/metadata.spec.ts']:
+            path = self.target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
         result = self.gate([], {'DRIVER_EXIT': '75'})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls, self.ordinary)
+
+    def test_plain_gate_reports_all_misnamed_test_files_before_running_tests(self):
+        names = ['tests/x.TEST.ts', 'tests/x.spec.ts', 'ignored/scratch.test.ts',
+                 "tests/quoted' name_test.ts", 'tests/x.test.tss', 'tests/support/nested.test.ts']
+        (self.target / '.gitignore').write_text('ignored/\n', encoding='utf-8')
+        for name in names:
+            path = self.target / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        result = self.gate([])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertCountEqual(result.stderr.splitlines(), [
+            f'check.sh: expected tests/<name>.test.ts, found ./{name}' for name in names
+        ])
+        self.assertEqual(self.calls, [])
 
     def test_plain_gate_rejects_bad_equivalence_list_before_tests(self):
         for message in ['Stale equivalence entries', 'Mutation campaign: invalid equivalence list']:
@@ -131,7 +153,7 @@ elif name == os.environ.get('FAIL_TOOL'):
         self.assertEqual(self.calls, self.status)
         result = self.gate([])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls, self.ordinary[:-1])
+        self.assertEqual(self.calls, self.ordinary[:-2])
 
     def test_final_clean_tree_includes_ignored_dist(self):
         for status in [
