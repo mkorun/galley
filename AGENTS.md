@@ -37,4 +37,6 @@ it compiles, where values land in the HTML and which URLs they can form.
   compiler.
 - `./check.sh` passes before every commit; `./check.sh --release` also runs the mutation campaign, once at the end of a
   round, on a clean tree. Run it on its own and check its exit status; never pipe or chain it.
+- Every test file lives directly in `tests/` and ends in lowercase `.test.ts`; the gate stops at any other file named
+  like a test (`.test.`, `_spec.` and the like, in any case, ignored directories included).
 - The human versions, tags, publishes and pushes.
